@@ -166,6 +166,12 @@ void loop()
 #if SLOWDOWN > 0
   delay(10);
 #endif
+  const bool usbConnected = Serial.dtr();
+  if (usbConnected != mkshft_ctrl::connected) {
+    mkshft_ctrl::connected = usbConnected;
+    mkshft_ui::setUsbConnected(usbConnected);
+  }
+
   statePrev = stateCurr;
   stateCurr = core::getState();
 
@@ -243,7 +249,16 @@ void ledUpdate()
 
 void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   using namespace mkshft_ctrl;
+  if (bufSz == 0) {
+    return;
+  }
+
   MessageType header = (MessageType)buffer[0];
+
+  if (header != MessageType::DISCONNECT) {
+    connected = true;
+    mkshft_ui::setUsbConnected(true);
+  }
 
 #if LOGLVL_MKSHFT_MAIN >= LOGLVL_TRACE
   // start debug message
@@ -251,11 +266,10 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   send(STRING, (uint8_t *)msg.data(), msg.length());
   send(STRING, buffer, bufSz);
   msg = "' of size ";
-  uint8_t szStr[10];
-  for(int i = 0; i < 10; i++) {szStr[i] = 0;}
-  sprintf(szStr, "%u", bufSz);
+  char szStr[16] = {};
+  snprintf(szStr, sizeof(szStr), "%u", bufSz);
   send(STRING, (uint8_t *)msg.data(), msg.length());
-  send(STRING, szStr, 10);
+  send(STRING, (uint8_t *)szStr, strlen(szStr));
   sendLine("");
 #endif
 
@@ -271,13 +285,10 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     send(STRING, (uint8_t *)msg.data(), msg.length());
     send(STRING, buffer, bufSz);
     msg = "' of size ";
-    uint8_t szStr[10];
-    for (int i = 0; i < 10; i++) {
-      szStr[i] = 0;
-    }
-    sprintf(szStr, "%u", bufSz);
+    char szStr[16] = {};
+    snprintf(szStr, sizeof(szStr), "%u", bufSz);
     send(STRING, (uint8_t *)msg.data(), msg.length());
-    send(STRING, szStr, 10);
+    send(STRING, (uint8_t *)szStr, strlen(szStr));
     sendLine("");
 #endif
     // convert buffer to string
@@ -300,6 +311,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     break;
   case MessageType::DISCONNECT:
     connected = false;
+    mkshft_ui::setUsbConnected(false);
     break;
   default:
     break;
@@ -332,7 +344,8 @@ void handleSymExp(std::string expStr) {
     {
       mkshft_lisp::log("Parsing successful");
       auto symRes = mkshft_lisp::toSym(res);
-      mkshft_lisp::logln(symRes);
+      mkshft_lisp::log(symRes);
+      mkshft_lisp::logln("");
     }
 
 #if LOGLVL_MKSHFT_MAIN >= LOGLVL_DEBUG

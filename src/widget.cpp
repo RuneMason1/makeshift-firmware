@@ -1,6 +1,6 @@
 #include <widget.hpp>
 
-inline namespace mkshft_ui {
+namespace mkshft_ui {
 
 Image<RGB565> *defaultCanvas = nullptr;
 
@@ -207,7 +207,7 @@ void WTextBox::render() {
 
   // while loop avoids rendering empty text boxes
   while (line != end && lineCount < maxLines) {
-    canvas->drawText(line->data(), cursor, fillColor, *fontFace, true);
+    canvas->drawText(line->data(), cursor, *fontFace, fillColor);
     ++line;
     ++lineCount;
     cursor.y += fontSz.y;
@@ -226,7 +226,8 @@ void WTextBox::_generateExtraParameters() {
 
   // setting the x-width through the graphics library
   int xadv = 0;
-  auto fontBox = canvas->measureChar('A', iVec2(0, 0), *fontFace, &xadv);
+  auto fontBox = canvas->measureChar('A', iVec2(0, 0), *fontFace,
+                                     DEFAULT_TEXT_ANCHOR, &xadv);
   fontSz.x = xadv;
   fontSz.y = fontFace->yAdvance;
 

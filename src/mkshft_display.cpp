@@ -27,7 +27,7 @@ void init() {
     delay(1000);
     loopCount++;
   }
-  if (loopCount <= 5) {
+  if (loopCount < 5) {
     displayReady = true;
   } // displayReady initialized to false
 

@@ -52,6 +52,8 @@ void init(Image<RGB565> *cnv);
 void renderUI();
 
 void splashScreen();
+
+void setUsbConnected(bool connected);
 } // namespace mkshft_ui
 
 #endif

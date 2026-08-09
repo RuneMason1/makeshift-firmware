@@ -1,6 +1,6 @@
 #include <mkshft_ui.hpp>
 
-inline namespace mkshft_ui {
+namespace mkshft_ui {
 
 Layout *currentLayout;
 std::map<std::string, Layout> layouts;
@@ -169,6 +169,20 @@ void renderUI() {
 }
 
 void splashScreen() {
+  // Keep the first screen independent of the unfinished layout dispatcher so
+  // it can also serve as a clear display and orientation diagnostic.
+  defaultCanvas->fillRect(iBox2(0, 319, 0, 239), RGB32(8, 13, 18));
+  defaultCanvas->fillRect(iBox2(0, 319, 0, 9), RGB32(42, 214, 168));
+  defaultCanvas->fillRect(iBox2(20, 299, 28, 211), RGB32(18, 29, 38));
+
+  defaultCanvas->drawText("MAKESHIFT", iVec2(40, 72), *baseFont,
+                          RGB32(42, 214, 168));
+  defaultCanvas->drawText("CONTROLLER READY", iVec2(40, 112), *baseFont,
+                          RGB32(245, 240, 220));
+  defaultCanvas->drawText("4 KNOBS  /  12 BUTTONS", iVec2(40, 150), *baseFont,
+                          RGB32(151, 166, 175));
+  setUsbConnected(false);
+
   // currentLayout->addWidget(WTriangle("testTriangle", iVec2(0,0), iVec2(50,0), iVec2(0,50)));
   // currentLayout->triangles.at("testTriangle")
   //     .setColors(tgx::RGB32_Purple, tgx::RGB32_Blue);
@@ -212,5 +226,13 @@ void splashScreen() {
   // currentLayout->textBoxes.at(textName).setText(testString);
 
   // layouts.at("default").
+}
+
+void setUsbConnected(bool connected) {
+  defaultCanvas->fillRect(iBox2(36, 284, 164, 194), RGB32(18, 29, 38));
+  defaultCanvas->drawText(connected ? "USB LINK: CONNECTED" : "USB LINK: WAITING",
+                          iVec2(40, 184), *baseFont,
+                          connected ? RGB32(42, 214, 168)
+                                    : RGB32(255, 184, 77));
 }
 } // namespace mkshft_ui
