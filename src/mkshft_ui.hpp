@@ -60,6 +60,8 @@ void setUsbConnected(bool connected);
 constexpr uint16_t GAME_ART_MAX_WIDTH = 160;
 constexpr uint16_t GAME_ART_MAX_HEIGHT = 160;
 constexpr size_t GAME_TITLE_MAX_LENGTH = 48;
+constexpr size_t GAME_APP_ID_MAX_LENGTH = 12;
+constexpr size_t GAME_LIST_MAX_ITEMS = 64;
 
 bool beginGameCard(const char *title, size_t titleLength, uint16_t width,
                    uint16_t height);
@@ -67,6 +69,16 @@ bool writeGameArtChunk(uint32_t pixelOffset, const uint8_t *data,
                        size_t dataLength);
 bool commitGameCard();
 void showHomeScreen();
+bool beginGameList(uint8_t expectedCount);
+bool addGameListItem(const char *appId, size_t appIdLength, const char *title,
+                     size_t titleLength);
+bool commitGameList();
+bool isLocalGameCarouselActive();
+bool isGameCardVisible();
+void moveLocalGameSelection(int delta);
+void updateGameCarouselTimeout();
+void showPlayPauseGlyph();
+const char *selectedGameAppId();
 } // namespace mkshft_ui
 
 #endif

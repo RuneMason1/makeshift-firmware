@@ -30,6 +30,9 @@ enum MessageType {
   GAME_ART_CHUNK,
   GAME_CARD_COMMIT,
   SCREEN_HOME,
+  GAME_LIST_BEGIN,
+  GAME_LIST_ITEM,
+  GAME_LIST_COMMIT,
 };
 
 extern bool connected;

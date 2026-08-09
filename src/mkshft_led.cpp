@@ -53,40 +53,37 @@ void init() {
 
   // Set up default light-ups
   Serial.println("LED_MATRIX:: setting default light sequences");
-  int row, col;
-  Color  cPeak = {165, 30, 155};
+  const Color cPeak = {216, 58, 4};
   for (int n = 0; n < StripSz; n++) {
-    row = ROW;
-    col = COL;
-    ColorSequence cQuence[2];
-    ColorSequence cQuenceTwo[2];
-    cQuence[0] = createFadeSequence(15, ColorOFF, cPeak, false, false);
-    cQuence[0].loop = false;
-    cQuence[1].events.clear();
-    cQuence[1].events.push_front({cPeak, 10, false});
-    cQuence[1].loop = 1;
+    ColorSequence riseAttack = createFadeSequence(15, ColorOFF, cPeak,
+                                                   false, false);
+    riseAttack.loop = false;
+    ColorSequence riseSustain;
+    riseSustain.events.push_front({cPeak, 10, false});
+    riseSustain.loop = true;
 
-    cQuenceTwo[0] = createFadeSequence(18, cPeak, ColorOFF, false, false);
-    cQuenceTwo[0].loop = false;
-    cQuenceTwo[1].events.clear();
-    cQuenceTwo[1].events.push_front(EventOFF);
-    cQuenceTwo[1].loop = 1;
+    ColorSequence fallAttack = createFadeSequence(18, cPeak, ColorOFF,
+                                                   false, false);
+    fallAttack.loop = false;
+    ColorSequence fallSustain;
+    fallSustain.events.push_front(EventOFF);
+    fallSustain.loop = true;
 
-    // Serial.println("cQuence 0");
-    // printSequence(cQuence[0]);
-    // delay(10);
-    // Serial.println("cQuence 1");
-    // printSequence(cQuence[1]);
-    // delay(10);
-    // Serial.println("cQuenceTwo 0");
-    // printSequence(cQuenceTwo[0]);
-    // delay(10);
-    // Serial.println("cQuenceTwo 1");
-    // printSequence(cQuenceTwo[1]);
-    // delay(10);
+    ledMatrix[ROW][COL].setSequence(Pixel::RISE, riseAttack, riseSustain);
+    ledMatrix[ROW][COL].setSequence(Pixel::FALL, fallAttack, fallSustain);
 
-    ledMatrix[ROW][COL].setSequence(Pixel::RISE, cQuence[0], cQuence[1]);
-    ledMatrix[ROW][COL].setSequence(Pixel::FALL, cQuenceTwo[0], cQuenceTwo[1]);
+    ColorSequence leftPulse = createFadeSequence(
+        3, Color{220, 20, 20}, ColorOFF, false, false);
+    leftPulse.loop = false;
+    ColorSequence rightPulse = createFadeSequence(
+        3, Color{20, 220, 70}, ColorOFF, false, false);
+    rightPulse.loop = false;
+    ColorSequence pulseEnd;
+    pulseEnd.events.push_front(EventOFF);
+    pulseEnd.loop = true;
+
+    ledMatrix[ROW][COL].setSequence(Pixel::TURN_LEFT, leftPulse, pulseEnd);
+    ledMatrix[ROW][COL].setSequence(Pixel::TURN_RIGHT, rightPulse, pulseEnd);
   }
   Serial.println("LED_MATRIX:: defaults setup successfully");
 

@@ -15,6 +15,9 @@ volatile uint16_t buttonExtendedState[szButtonArray] = {0, 0, 0, 0, 0, 0, 0, 0,
 
 volatile int dialState[szDialArray] = {0, 0, 0, 0};
 volatile int dialStateRelative[szDialArray] = {0, 0, 0, 0};
+int dialSubstepRemainder[szDialArray] = {0, 0, 0, 0};
+
+constexpr int ENCODER_COUNTS_PER_DETENT = 4;
 
 Encoder *dials;
 
@@ -38,7 +41,15 @@ void readDials() {
   bool maxState, minState, boundIndex;
   for (int i = 0; i < szDialArray; i++) {
     dialTemp = dials[i].read();
-    dialStateRelative[i] = dialTemp - dialState[i];
+    dialSubstepRemainder[i] += dialTemp - dialState[i];
+    while (dialSubstepRemainder[i] >= ENCODER_COUNTS_PER_DETENT) {
+      dialStateRelative[i]++;
+      dialSubstepRemainder[i] -= ENCODER_COUNTS_PER_DETENT;
+    }
+    while (dialSubstepRemainder[i] <= -ENCODER_COUNTS_PER_DETENT) {
+      dialStateRelative[i]--;
+      dialSubstepRemainder[i] += ENCODER_COUNTS_PER_DETENT;
+    }
 
     // These bools come from checking if the state we just read has passed the
     // upper or lower bound of the specific dial we're checking
@@ -286,6 +297,7 @@ void updateState() {
 state_t getState() {
   struct state_t s;
 
+  noInterrupts();
   s.snapShotTime = millis();
 
   for (int i = 0; i < szButtonArray; i++) {
@@ -297,7 +309,9 @@ state_t getState() {
   for (int i = 0; i < szDialArray; i++) {
     s.dial[i] = dialState[i];
     s.dialRelative[i] = dialStateRelative[i];
+    dialStateRelative[i] = 0;
   }
+  interrupts();
 
   return s;
 }

@@ -38,7 +38,7 @@ static char *serialNumber;
 const long readInputPeriodUs =
     1000L; // microseconds between dial + button scanning cycle
 const long ledRenderPeriodUs =
-    26667L; // microseconds between updates to visual elements
+    26667L; // microseconds between LED animation frames
  
 
 /*
@@ -133,13 +133,7 @@ void setup()
 
   mkshft_ctrl::sendLine("MKSHFT:: Successfully started state scanning timer.");
 
-  mkshft_ctrl::sendLine("MKSHFT:: Starting LED render timers...");
-
-#ifdef DEBUG
-  delay(500);
-#endif
   ledRenderTimer.begin(ledUpdate, ledRenderPeriodUs);
-  mkshft_ctrl::sendLine("MKSHFT:: Successfully started LED rendering timer.");
 
   // testWidgets();
 
@@ -175,6 +169,21 @@ void loop()
   statePrev = stateCurr;
   stateCurr = core::getState();
 
+  if (mkshft_ui::isLocalGameCarouselActive()) {
+    if (stateCurr.dialRelative[0] != 0) {
+      mkshft_ui::moveLocalGameSelection(stateCurr.dialRelative[0]);
+      mkshft_ctrl::sendString(std::string("GAME_SELECT:") +
+                              mkshft_ui::selectedGameAppId());
+    }
+    if (statePrev.button[0] != stateCurr.button[0] &&
+        stateCurr.button[0] == core::ON && mkshft_ui::isGameCardVisible()) {
+      mkshft_ctrl::sendString(std::string("GAME_LAUNCH:") +
+                              mkshft_ui::selectedGameAppId());
+      mkshft_ui::showHomeScreen();
+    }
+  }
+  mkshft_ui::updateGameCarouselTimeout();
+
   // check button states
   for (int i = 0; i < core::szButtonArray; i++)
   {
@@ -187,16 +196,11 @@ void loop()
     col = core::ButtonLookup[i][1];
     if (statePrev.button[i] != stateCurr.button[i])
     {
-      Pixel::edge_t edge;
-      if (stateCurr.button[i] == core::ON)
-      {
-        edge = Pixel::RISE;
+      mkshft_ledMatrix::ledMatrix[row][col].triggeredSeqIdx =
+          stateCurr.button[i] == core::ON ? Pixel::RISE : Pixel::FALL;
+      if (i == 4 && stateCurr.button[i] == core::ON) {
+        mkshft_ui::showPlayPauseGlyph();
       }
-      else
-      {
-        edge = Pixel::FALL;
-      }
-      mkshft_ledMatrix::ledMatrix[row][col].triggeredSeqIdx = edge;
       stateChanged = true;
     }
     // if (stateCurr.button[15] == true) {
@@ -209,6 +213,11 @@ void loop()
   {
     if (stateCurr.dialRelative[i] != 0)
     {
+      const uint8_t dialRow = core::ButtonLookup[i][0];
+      const uint8_t dialCol = core::ButtonLookup[i][1];
+      mkshft_ledMatrix::ledMatrix[dialRow][dialCol].triggeredSeqIdx =
+          stateCurr.dialRelative[i] < 0 ? Pixel::TURN_LEFT
+                                        : Pixel::TURN_RIGHT;
       stateChanged = true;
 
       // if (i == 1)
@@ -230,7 +239,12 @@ void loop()
   // send updates
   if (stateChanged == true)
   {
-    mkshft_ctrl::sendState(stateCurr);
+    core::state_t stateToSend = stateCurr;
+    if (mkshft_ui::isLocalGameCarouselActive()) {
+      stateToSend.dialRelative[0] = 0;
+      stateToSend.button[0] = false;
+    }
+    mkshft_ctrl::sendState(stateToSend);
     // core::printStateToSerial(core::getState());
   }
   stateChanged = false;
@@ -347,7 +361,6 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
       sendByte(MessageType::ERROR);
       break;
     }
-    sendByte(MessageType::ACK);
     break;
   }
   case MessageType::GAME_CARD_COMMIT:
@@ -357,6 +370,32 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   case MessageType::SCREEN_HOME:
     mkshft_ui::showHomeScreen();
     sendByte(MessageType::ACK);
+    break;
+  case MessageType::GAME_LIST_BEGIN:
+    sendByte(bufSz == 2 && mkshft_ui::beginGameList(buffer[1])
+                 ? MessageType::ACK
+                 : MessageType::ERROR);
+    break;
+  case MessageType::GAME_LIST_ITEM: {
+    if (bufSz < 4) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    const uint8_t appIdLength = buffer[1];
+    const uint8_t titleLength = buffer[2];
+    const bool valid = appIdLength > 0 && titleLength > 0 &&
+                       bufSz == static_cast<size_t>(3 + appIdLength + titleLength);
+    sendByte(valid && mkshft_ui::addGameListItem(
+                          reinterpret_cast<const char *>(buffer + 3), appIdLength,
+                          reinterpret_cast<const char *>(buffer + 3 + appIdLength),
+                          titleLength)
+                 ? MessageType::ACK
+                 : MessageType::ERROR);
+    break;
+  }
+  case MessageType::GAME_LIST_COMMIT:
+    sendByte(mkshft_ui::commitGameList() ? MessageType::ACK
+                                         : MessageType::ERROR);
     break;
   default:
     break;

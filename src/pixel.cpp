@@ -73,7 +73,7 @@ void Pixel::advanceEvent() {
   if (activeEvent == activeSequence.events.end()) {
     if (activeSequence.loop == true) {
       // restart sequence if it loops
-      activeEvent++;
+      activeEvent = activeSequence.events.begin();
       // set frame count from new event
       framesLeft = activeEvent->lengthFrames - 1;
     } else { // pass to advanceSequence if loop ends

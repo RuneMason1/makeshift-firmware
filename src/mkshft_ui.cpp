@@ -14,6 +14,23 @@ bool gameTransferActive = false;
 bool gameCardVisible = false;
 bool usbConnected = false;
 
+struct CachedGame {
+  char appId[GAME_APP_ID_MAX_LENGTH + 1];
+  char title[GAME_TITLE_MAX_LENGTH + 1];
+};
+
+CachedGame cachedGames[GAME_LIST_MAX_ITEMS] = {};
+uint8_t cachedGameCount = 0;
+uint8_t expectedGameCount = 0;
+uint8_t selectedGameIndex = 0;
+bool localGameCarouselActive = false;
+uint32_t gameCardLastInteractionMs = 0;
+bool actionGlyphVisible = false;
+uint32_t actionGlyphShownMs = 0;
+
+constexpr uint32_t GAME_CARD_TIMEOUT_MS = 5000;
+constexpr uint32_t ACTION_GLYPH_TIMEOUT_MS = 1500;
+
 namespace {
 void drawGameTitle(const char *title) {
   constexpr size_t lineLength = 17;
@@ -34,22 +51,88 @@ void drawGameTitle(const char *title) {
   }
 }
 
-void renderGameCard() {
+void renderGameCard(bool artworkReady) {
   defaultCanvas->fillRect(iBox2(0, 319, 0, 239), RGB32(8, 13, 18));
   defaultCanvas->fillRect(iBox2(0, 319, 0, 9), RGB32(255, 184, 77));
   defaultCanvas->drawText("GAME LIBRARY", iVec2(24, 31), *baseFont,
                           RGB32(255, 184, 77));
 
   const int artX = 16;
-  const int artY = 48 + ((160 - gameArtHeight) / 2);
+  const int artY = 48;
   defaultCanvas->fillRect(iBox2(12, 179, 44, 211), RGB32(18, 29, 38));
-  Image<RGB565> artwork(gameArtwork, gameArtWidth, gameArtHeight);
-  defaultCanvas->blit(artwork, iVec2(artX + ((160 - gameArtWidth) / 2), artY));
+  if (artworkReady) {
+    Image<RGB565> artwork(gameArtwork, gameArtWidth, gameArtHeight);
+    for (int y = 0; y < 160; ++y) {
+      const int sourceY = (y * gameArtHeight) / 160;
+      for (int x = 0; x < 160; ++x) {
+        const int sourceX = (x * gameArtWidth) / 160;
+        defaultCanvas->drawPixel<false>(iVec2(artX + x, artY + y),
+                                        artwork(sourceX, sourceY));
+      }
+    }
+  } else {
+    defaultCanvas->drawText("LOADING ART", iVec2(48, 132), *baseFont,
+                            RGB32(151, 166, 175));
+  }
 
   drawGameTitle(gameTitle);
   defaultCanvas->drawText("<  TURN  >", iVec2(192, 174), *baseFont,
                           RGB32(151, 166, 175));
   defaultCanvas->drawText("PRESS TO PLAY", iVec2(192, 204), *baseFont,
+                          RGB32(42, 214, 168));
+}
+
+void renderTextGameTitle() {
+  defaultCanvas->fillRect(iBox2(20, 299, 54, 171), RGB32(18, 29, 38));
+
+  const GFXfont &titleFont = iosevka_mkshft_regular9pt7b;
+  constexpr size_t lineLength = 25;
+  char lines[3][lineLength + 1] = {};
+  uint8_t lineCount = 0;
+  const char *cursor = gameTitle;
+
+  while (*cursor != '\0' && lineCount < 3) {
+    while (*cursor == ' ') ++cursor;
+    size_t used = 0;
+    while (*cursor != '\0') {
+      const char *wordStart = cursor;
+      while (*cursor != '\0' && *cursor != ' ') ++cursor;
+      const size_t wordLength = cursor - wordStart;
+      const size_t separator = used == 0 ? 0 : 1;
+      if (used > 0 && used + separator + wordLength > lineLength) break;
+      if (separator) lines[lineCount][used++] = ' ';
+      const size_t copyLength = min(wordLength, lineLength - used);
+      memcpy(lines[lineCount] + used, wordStart, copyLength);
+      used += copyLength;
+      if (copyLength < wordLength) cursor = wordStart + copyLength;
+      while (*cursor == ' ') ++cursor;
+      if (used == lineLength) break;
+    }
+    lines[lineCount][used] = '\0';
+    ++lineCount;
+  }
+
+  const int firstY = 87 + ((3 - lineCount) * 14);
+  for (uint8_t line = 0; line < lineCount; ++line) {
+    int advance = 0;
+    defaultCanvas->measureChar('A', iVec2(0, 0), titleFont,
+                               DEFAULT_TEXT_ANCHOR, &advance);
+    const int x = max(12, (320 - static_cast<int>(strlen(lines[line])) * advance) / 2);
+    defaultCanvas->drawText(lines[line], iVec2(x, firstY + line * 30),
+                            titleFont, RGB32(245, 240, 220));
+  }
+}
+
+void renderTextGameCard() {
+  defaultCanvas->fillRect(iBox2(0, 319, 0, 239), RGB32(8, 13, 18));
+  defaultCanvas->fillRect(iBox2(0, 319, 0, 9), RGB32(255, 184, 77));
+  defaultCanvas->drawText("GAME LIBRARY", iVec2(24, 31), *baseFont,
+                          RGB32(255, 184, 77));
+  renderTextGameTitle();
+
+  defaultCanvas->drawText("< TURN >", iVec2(36, 204), *baseFont,
+                          RGB32(151, 166, 175));
+  defaultCanvas->drawText("PRESS TO PLAY", iVec2(174, 204), *baseFont,
                           RGB32(42, 214, 168));
 }
 } // namespace
@@ -218,19 +301,8 @@ void renderUI() {
 }
 
 void splashScreen() {
-  // Keep the first screen independent of the unfinished layout dispatcher so
-  // it can also serve as a clear display and orientation diagnostic.
-  defaultCanvas->fillRect(iBox2(0, 319, 0, 239), RGB32(8, 13, 18));
-  defaultCanvas->fillRect(iBox2(0, 319, 0, 9), RGB32(42, 214, 168));
-  defaultCanvas->fillRect(iBox2(20, 299, 28, 211), RGB32(18, 29, 38));
-
-  defaultCanvas->drawText("MAKESHIFT", iVec2(40, 72), *baseFont,
-                          RGB32(42, 214, 168));
-  defaultCanvas->drawText("CONTROLLER READY", iVec2(40, 112), *baseFont,
-                          RGB32(245, 240, 220));
-  defaultCanvas->drawText("4 KNOBS  /  12 BUTTONS", iVec2(40, 150), *baseFont,
-                          RGB32(151, 166, 175));
-  setUsbConnected(false);
+  defaultCanvas->blit(splash565, iVec2(0, 0));
+  setUsbConnected(usbConnected);
 
   // currentLayout->addWidget(WTriangle("testTriangle", iVec2(0,0), iVec2(50,0), iVec2(0,50)));
   // currentLayout->triangles.at("testTriangle")
@@ -279,21 +351,23 @@ void splashScreen() {
 
 void setUsbConnected(bool connected) {
   usbConnected = connected;
-  if (gameCardVisible) {
+  if (gameCardVisible || actionGlyphVisible) {
     return;
   }
-  defaultCanvas->fillRect(iBox2(36, 284, 164, 194), RGB32(18, 29, 38));
-  defaultCanvas->drawText(connected ? "USB LINK: CONNECTED" : "USB LINK: WAITING",
-                          iVec2(40, 184), *baseFont,
-                          connected ? RGB32(42, 214, 168)
-                                    : RGB32(255, 184, 77));
+  defaultCanvas->fillRect(iBox2(0, 319, 0, 9),
+                          connected ? RGB32(216, 58, 4)
+                                    : RGB32(72, 24, 8));
 }
 
 bool beginGameCard(const char *title, size_t titleLength, uint16_t width,
                    uint16_t height) {
+  const bool textOnly = width == 0 && height == 0;
+  const bool validArtworkSize = width > 0 && height > 0 &&
+                                width <= GAME_ART_MAX_WIDTH &&
+                                height <= GAME_ART_MAX_HEIGHT;
   if (title == nullptr || titleLength == 0 ||
-      titleLength > GAME_TITLE_MAX_LENGTH || width == 0 || height == 0 ||
-      width > GAME_ART_MAX_WIDTH || height > GAME_ART_MAX_HEIGHT) {
+      titleLength > GAME_TITLE_MAX_LENGTH ||
+      (!textOnly && !validArtworkSize)) {
     gameTransferActive = false;
     return false;
   }
@@ -303,7 +377,12 @@ bool beginGameCard(const char *title, size_t titleLength, uint16_t width,
   gameArtWidth = width;
   gameArtHeight = height;
   gamePixelsReceived = 0;
-  gameTransferActive = true;
+  gameTransferActive = !textOnly;
+  gameCardVisible = true;
+  actionGlyphVisible = false;
+  gameCardLastInteractionMs = millis();
+  if (textOnly) renderTextGameCard();
+  else renderGameCard(false);
   return true;
 }
 
@@ -337,7 +416,8 @@ bool commitGameCard() {
 
   gameTransferActive = false;
   gameCardVisible = true;
-  renderGameCard();
+  gameCardLastInteractionMs = millis();
+  renderGameCard(true);
   return true;
 }
 
@@ -345,7 +425,97 @@ void showHomeScreen() {
   const bool wasUsbConnected = usbConnected;
   gameTransferActive = false;
   gameCardVisible = false;
+  gameCardLastInteractionMs = 0;
+  actionGlyphVisible = false;
+  actionGlyphShownMs = 0;
   splashScreen();
   setUsbConnected(wasUsbConnected);
+}
+
+bool beginGameList(uint8_t expectedCount) {
+  if (expectedCount == 0 || expectedCount > GAME_LIST_MAX_ITEMS) return false;
+  expectedGameCount = expectedCount;
+  cachedGameCount = 0;
+  localGameCarouselActive = false;
+  return true;
+}
+
+bool addGameListItem(const char *appId, size_t appIdLength, const char *title,
+                     size_t titleLength) {
+  if (cachedGameCount >= expectedGameCount || appId == nullptr || title == nullptr ||
+      appIdLength == 0 || appIdLength > GAME_APP_ID_MAX_LENGTH ||
+      titleLength == 0 || titleLength > GAME_TITLE_MAX_LENGTH) return false;
+  CachedGame &game = cachedGames[cachedGameCount++];
+  memcpy(game.appId, appId, appIdLength);
+  game.appId[appIdLength] = '\0';
+  memcpy(game.title, title, titleLength);
+  game.title[titleLength] = '\0';
+  return true;
+}
+
+bool commitGameList() {
+  if (cachedGameCount == 0 || cachedGameCount != expectedGameCount) return false;
+  selectedGameIndex = 0;
+  localGameCarouselActive = true;
+  return true;
+}
+
+bool isLocalGameCarouselActive() { return localGameCarouselActive; }
+bool isGameCardVisible() { return gameCardVisible; }
+
+void moveLocalGameSelection(int delta) {
+  if (!localGameCarouselActive || cachedGameCount == 0 || delta == 0) return;
+  const bool wasVisible = gameCardVisible;
+  if (!wasVisible) {
+    selectedGameIndex = 0;
+  } else {
+    int next = static_cast<int>(selectedGameIndex) + delta;
+    next %= cachedGameCount;
+    if (next < 0) next += cachedGameCount;
+    selectedGameIndex = next;
+  }
+  strncpy(gameTitle, cachedGames[selectedGameIndex].title, GAME_TITLE_MAX_LENGTH);
+  gameTitle[GAME_TITLE_MAX_LENGTH] = '\0';
+  gameCardVisible = true;
+  gameTransferActive = false;
+  gameCardLastInteractionMs = millis();
+  if (wasVisible) renderTextGameTitle();
+  else renderTextGameCard();
+}
+
+void updateGameCarouselTimeout() {
+  const uint32_t now = millis();
+  const bool gameExpired = gameCardVisible && gameCardLastInteractionMs != 0 &&
+      static_cast<uint32_t>(now - gameCardLastInteractionMs) >=
+          GAME_CARD_TIMEOUT_MS;
+  const bool actionExpired = actionGlyphVisible && actionGlyphShownMs != 0 &&
+      static_cast<uint32_t>(now - actionGlyphShownMs) >=
+          ACTION_GLYPH_TIMEOUT_MS;
+  if (gameExpired || actionExpired) {
+    showHomeScreen();
+  }
+}
+
+void showPlayPauseGlyph() {
+  gameTransferActive = false;
+  gameCardVisible = false;
+  actionGlyphVisible = true;
+  actionGlyphShownMs = millis();
+
+  const RGB32 background(8, 13, 18);
+  const RGB32 orange(216, 58, 4);
+  const RGB32 foreground(245, 240, 220);
+  defaultCanvas->fillRect(iBox2(0, 319, 0, 239), background);
+  defaultCanvas->fillRect(iBox2(0, 319, 0, 9),
+                          usbConnected ? orange : RGB32(72, 24, 8));
+  defaultCanvas->drawText("MEDIA", iVec2(132, 42), *baseFont, orange);
+  defaultCanvas->fillTriangle(iVec2(67, 76), iVec2(67, 178),
+                              iVec2(151, 127), foreground, foreground, 1.0f);
+  defaultCanvas->fillRect(iBox2(184, 211, 76, 178), foreground);
+  defaultCanvas->fillRect(iBox2(231, 258, 76, 178), foreground);
+}
+
+const char *selectedGameAppId() {
+  return cachedGameCount == 0 ? "" : cachedGames[selectedGameIndex].appId;
 }
 } // namespace mkshft_ui
