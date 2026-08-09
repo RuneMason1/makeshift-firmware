@@ -5,6 +5,55 @@ namespace mkshft_ui {
 Layout *currentLayout;
 std::map<std::string, Layout> layouts;
 
+DMAMEM uint16_t gameArtwork[GAME_ART_MAX_WIDTH * GAME_ART_MAX_HEIGHT];
+char gameTitle[GAME_TITLE_MAX_LENGTH + 1] = {};
+uint16_t gameArtWidth = 0;
+uint16_t gameArtHeight = 0;
+uint32_t gamePixelsReceived = 0;
+bool gameTransferActive = false;
+bool gameCardVisible = false;
+bool usbConnected = false;
+
+namespace {
+void drawGameTitle(const char *title) {
+  constexpr size_t lineLength = 17;
+  char line[lineLength + 1] = {};
+  size_t source = 0;
+  int y = 82;
+
+  for (uint8_t lineNumber = 0; lineNumber < 3 && title[source] != '\0';
+       ++lineNumber) {
+    size_t count = 0;
+    while (count < lineLength && title[source] != '\0') {
+      line[count++] = title[source++];
+    }
+    line[count] = '\0';
+    defaultCanvas->drawText(line, iVec2(192, y), *baseFont,
+                            RGB32(245, 240, 220));
+    y += 24;
+  }
+}
+
+void renderGameCard() {
+  defaultCanvas->fillRect(iBox2(0, 319, 0, 239), RGB32(8, 13, 18));
+  defaultCanvas->fillRect(iBox2(0, 319, 0, 9), RGB32(255, 184, 77));
+  defaultCanvas->drawText("GAME LIBRARY", iVec2(24, 31), *baseFont,
+                          RGB32(255, 184, 77));
+
+  const int artX = 16;
+  const int artY = 48 + ((160 - gameArtHeight) / 2);
+  defaultCanvas->fillRect(iBox2(12, 179, 44, 211), RGB32(18, 29, 38));
+  Image<RGB565> artwork(gameArtwork, gameArtWidth, gameArtHeight);
+  defaultCanvas->blit(artwork, iVec2(artX + ((160 - gameArtWidth) / 2), artY));
+
+  drawGameTitle(gameTitle);
+  defaultCanvas->drawText("<  TURN  >", iVec2(192, 174), *baseFont,
+                          RGB32(151, 166, 175));
+  defaultCanvas->drawText("PRESS TO PLAY", iVec2(192, 204), *baseFont,
+                          RGB32(42, 214, 168));
+}
+} // namespace
+
 template <class T> bool Layout::addWidget(T w) {
   WidgetType wType = w.getType();
   T* widg = _emplaceWidget(w);
@@ -229,10 +278,74 @@ void splashScreen() {
 }
 
 void setUsbConnected(bool connected) {
+  usbConnected = connected;
+  if (gameCardVisible) {
+    return;
+  }
   defaultCanvas->fillRect(iBox2(36, 284, 164, 194), RGB32(18, 29, 38));
   defaultCanvas->drawText(connected ? "USB LINK: CONNECTED" : "USB LINK: WAITING",
                           iVec2(40, 184), *baseFont,
                           connected ? RGB32(42, 214, 168)
                                     : RGB32(255, 184, 77));
+}
+
+bool beginGameCard(const char *title, size_t titleLength, uint16_t width,
+                   uint16_t height) {
+  if (title == nullptr || titleLength == 0 ||
+      titleLength > GAME_TITLE_MAX_LENGTH || width == 0 || height == 0 ||
+      width > GAME_ART_MAX_WIDTH || height > GAME_ART_MAX_HEIGHT) {
+    gameTransferActive = false;
+    return false;
+  }
+
+  memcpy(gameTitle, title, titleLength);
+  gameTitle[titleLength] = '\0';
+  gameArtWidth = width;
+  gameArtHeight = height;
+  gamePixelsReceived = 0;
+  gameTransferActive = true;
+  return true;
+}
+
+bool writeGameArtChunk(uint32_t pixelOffset, const uint8_t *data,
+                       size_t dataLength) {
+  if (!gameTransferActive || data == nullptr || dataLength == 0 ||
+      (dataLength % 2) != 0 || pixelOffset != gamePixelsReceived) {
+    return false;
+  }
+
+  const uint32_t pixelCount = dataLength / 2;
+  const uint32_t expectedPixels = gameArtWidth * gameArtHeight;
+  if (pixelOffset + pixelCount > expectedPixels) {
+    gameTransferActive = false;
+    return false;
+  }
+
+  for (uint32_t index = 0; index < pixelCount; ++index) {
+    gameArtwork[pixelOffset + index] =
+        (static_cast<uint16_t>(data[index * 2]) << 8) | data[index * 2 + 1];
+  }
+  gamePixelsReceived += pixelCount;
+  return true;
+}
+
+bool commitGameCard() {
+  const uint32_t expectedPixels = gameArtWidth * gameArtHeight;
+  if (!gameTransferActive || gamePixelsReceived != expectedPixels) {
+    return false;
+  }
+
+  gameTransferActive = false;
+  gameCardVisible = true;
+  renderGameCard();
+  return true;
+}
+
+void showHomeScreen() {
+  const bool wasUsbConnected = usbConnected;
+  gameTransferActive = false;
+  gameCardVisible = false;
+  splashScreen();
+  setUsbConnected(wasUsbConnected);
 }
 } // namespace mkshft_ui

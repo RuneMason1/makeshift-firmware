@@ -26,6 +26,10 @@ enum MessageType {
   ERROR,
   STRING,
   DISCONNECT,
+  GAME_CARD_BEGIN,
+  GAME_ART_CHUNK,
+  GAME_CARD_COMMIT,
+  SCREEN_HOME,
 };
 
 extern bool connected;

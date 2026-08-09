@@ -313,6 +313,51 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     connected = false;
     mkshft_ui::setUsbConnected(false);
     break;
+  case MessageType::GAME_CARD_BEGIN: {
+    // width:u16, height:u16, titleLength:u8, title:utf8
+    if (bufSz < 6) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    const uint16_t width = (buffer[1] << 8) | buffer[2];
+    const uint16_t height = (buffer[3] << 8) | buffer[4];
+    const uint8_t titleLength = buffer[5];
+    const bool validLength =
+        titleLength > 0 && bufSz == static_cast<size_t>(6 + titleLength);
+    if (!validLength ||
+        !mkshft_ui::beginGameCard(reinterpret_cast<const char *>(buffer + 6),
+                                  titleLength, width, height)) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    sendByte(MessageType::ACK);
+    break;
+  }
+  case MessageType::GAME_ART_CHUNK: {
+    // pixelOffset:u32, pixels:RGB565 big-endian
+    if (bufSz < 7) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    const uint32_t pixelOffset =
+        (static_cast<uint32_t>(buffer[1]) << 24) |
+        (static_cast<uint32_t>(buffer[2]) << 16) |
+        (static_cast<uint32_t>(buffer[3]) << 8) | buffer[4];
+    if (!mkshft_ui::writeGameArtChunk(pixelOffset, buffer + 5, bufSz - 5)) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    sendByte(MessageType::ACK);
+    break;
+  }
+  case MessageType::GAME_CARD_COMMIT:
+    sendByte(mkshft_ui::commitGameCard() ? MessageType::ACK
+                                         : MessageType::ERROR);
+    break;
+  case MessageType::SCREEN_HOME:
+    mkshft_ui::showHomeScreen();
+    sendByte(MessageType::ACK);
+    break;
   default:
     break;
   }

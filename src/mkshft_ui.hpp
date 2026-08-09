@@ -54,6 +54,19 @@ void renderUI();
 void splashScreen();
 
 void setUsbConnected(bool connected);
+
+// Game artwork is transferred in bounded RGB565 chunks over the existing
+// SLIP transport. A card is not displayed until the complete image commits.
+constexpr uint16_t GAME_ART_MAX_WIDTH = 160;
+constexpr uint16_t GAME_ART_MAX_HEIGHT = 160;
+constexpr size_t GAME_TITLE_MAX_LENGTH = 48;
+
+bool beginGameCard(const char *title, size_t titleLength, uint16_t width,
+                   uint16_t height);
+bool writeGameArtChunk(uint32_t pixelOffset, const uint8_t *data,
+                       size_t dataLength);
+bool commitGameCard();
+void showHomeScreen();
 } // namespace mkshft_ui
 
 #endif
