@@ -21,6 +21,7 @@ void Pixel::setMatrixCoord(uint8_t r, uint8_t c) {
 void Pixel::resetToBlank() {
   savedSequences[FALL][SUS].events.clear();
   savedSequences[FALL][SUS].events.push_front(EventOFF);
+  savedSequences[FALL][SUS].loop = true;
   triggeredSeqIdx = NONE;
   currentSequenceIdx = FALL;
   currentPhaseIdx = SUS;
@@ -66,6 +67,10 @@ void Pixel::advanceFrame() {
 }
 
 void Pixel::advanceEvent() {
+  if (activeSequence.events.empty()) {
+    resetToBlank();
+    return;
+  }
   // advance to the next event
   activeEvent++;
 
@@ -108,8 +113,13 @@ void Pixel::advanceSequence() {
   triggeredSeqIdx = NONE;
 
 
-  activeSequence.events = savedSequences[targetSequenceIdx][targetPhase].events;
-  activeSequence.loop = savedSequences[targetSequenceIdx][targetPhase].loop;
+  const ColorSequence &target = savedSequences[targetSequenceIdx][targetPhase];
+  if (target.events.empty()) {
+    resetToBlank();
+    return;
+  }
+  activeSequence.events = target.events;
+  activeSequence.loop = target.loop;
   activeEvent = activeSequence.events.begin();
   framesLeft = activeEvent->lengthFrames - 1;
 }

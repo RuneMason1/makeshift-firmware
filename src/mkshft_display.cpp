@@ -2,6 +2,7 @@
 inline namespace mkshft_display {
 
 bool displayReady = false;
+bool displaySleeping = false;
 // Display driver with the pins
 ILI9341_T4::ILI9341Driver tft(CS_PIN, DC_PIN, SCK_PIN, SDI_PIN, SDO_PIN,
                               RST_PIN, TOUCH_CS_PIN, TOUCH_IRQ_PIN);
@@ -66,7 +67,7 @@ bool fullUpdate = false;
  * The update function
  */
 void update() {
-  if (displayReady) {
+  if (displayReady && !displaySleeping) {
     tft.update(fb, fullUpdate);
     currRenderTime = millis();
     renderDelta = currRenderTime - lastRenderTime;
@@ -78,6 +79,24 @@ void update() {
     lastRenderTime = currRenderTime;
   }
 }
+
+void setSleeping(bool sleeping) {
+  if (!displayReady || displaySleeping == sleeping) return;
+
+  if (sleeping) {
+    tft.sleep(true);
+    displaySleeping = true;
+    return;
+  }
+
+  tft.sleep(false);
+  displaySleeping = false;
+  fullUpdate = true;
+  tft.update(fb, true);
+  lastRenderTime = millis();
+}
+
+bool isSleeping() { return displaySleeping; }
 
 void calibrateTouch() {
   if (displayReady) {

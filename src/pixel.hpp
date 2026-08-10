@@ -10,14 +10,14 @@
 
 class Pixel {
 public:
-  enum edge_t { NONE = -1, RISE = 0, FALL = 1, TURN_LEFT = 2, TURN_RIGHT = 3 };
+  enum edge_t { NONE = -1, RISE = 0, FALL = 1, EXTRA = 2 };
   enum phase_t { ATK = 0, SUS = 1 };
   volatile edge_t triggeredSeqIdx;
 
 private:
   ColorSequenceItr activeEvent;
   ColorSequence activeSequence;
-  ColorSequence savedSequences[4][2];
+  ColorSequence savedSequences[3][2];
   int16_t row, col;
   uint32_t framesLeft;
   volatile edge_t currentSequenceIdx;

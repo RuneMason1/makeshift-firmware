@@ -6,6 +6,11 @@
 
 build/
 
+# Local rollback artifacts. Keep release binaries out of public commits unless
+# they are deliberately force-added for a published release.
+firmware-builds/*.hex
+firmware-builds/*.hex.sha256
+
 documentation/build/
 documentation/source/_*
 documentation/source/html/

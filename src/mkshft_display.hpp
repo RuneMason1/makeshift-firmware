@@ -32,6 +32,8 @@ extern tgx::Image<RGB565> canvas;
 void init();
 // alias for tft.update(fb)
 void update();
+void setSleeping(bool sleeping);
+bool isSleeping();
 void calibrateTouch();
 void test();
 

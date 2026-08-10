@@ -57,14 +57,15 @@ void setUsbConnected(bool connected);
 
 // Game artwork is transferred in bounded RGB565 chunks over the existing
 // SLIP transport. A card is not displayed until the complete image commits.
-constexpr uint16_t GAME_ART_MAX_WIDTH = 160;
-constexpr uint16_t GAME_ART_MAX_HEIGHT = 160;
+constexpr uint16_t GAME_ART_MAX_WIDTH = 80;
+constexpr uint16_t GAME_ART_MAX_HEIGHT = 80;
+constexpr uint8_t GAME_ART_CACHE_SLOTS = 5;
 constexpr size_t GAME_TITLE_MAX_LENGTH = 48;
 constexpr size_t GAME_APP_ID_MAX_LENGTH = 12;
 constexpr size_t GAME_LIST_MAX_ITEMS = 64;
 
-bool beginGameCard(const char *title, size_t titleLength, uint16_t width,
-                   uint16_t height);
+bool beginGameCard(uint8_t slot, uint8_t gameIndex, const char *title,
+                   size_t titleLength, uint16_t width, uint16_t height);
 bool writeGameArtChunk(uint32_t pixelOffset, const uint8_t *data,
                        size_t dataLength);
 bool commitGameCard();
@@ -76,8 +77,13 @@ bool commitGameList();
 bool isLocalGameCarouselActive();
 bool isGameCardVisible();
 void moveLocalGameSelection(int delta);
-void updateGameCarouselTimeout();
-void showPlayPauseGlyph();
+bool updateGameCarouselTimeout();
+void showGoXlrStatus(bool adjusting, const char *name, size_t nameLength,
+                     uint8_t percent);
+void updateOverlayTimeout();
+bool showActionGlyph(uint8_t glyphId);
+void setNowPlaying(bool playing, const char *text, size_t textLength);
+void updateNowPlayingTicker();
 const char *selectedGameAppId();
 } // namespace mkshft_ui
 

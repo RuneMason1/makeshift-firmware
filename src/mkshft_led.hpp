@@ -34,18 +34,18 @@ const uint8_t StripLookup[RowSz * ColSz][2] = {
     {0, 3}, {0, 2}, {0, 1}, {0, 0}, {1, 0}, {1, 1}, {1, 2}, {1, 3},
     {2, 3}, {2, 2}, {2, 1}, {2, 0}, {3, 0}, {3, 1}, {3, 2}, {3, 3}};
 
-extern Pixel ledMatrix[RowSz][ColSz];
-
 void init();
 void post();
-
 void updateState();
 void showMatrix();
+void setEnabled(bool enabled);
 
 void colorStripPixel(uint8_t row, uint8_t col, uint8_t r, uint8_t g, uint8_t b);
-void colorStripPixel(uint8_t row, uint8_t col, Color c);
+void colorStripPixel(uint8_t row, uint8_t col, Color color);
 
 void applyToMatrix(void (*apply)(uint8_t, uint8_t));
+
+extern Pixel ledMatrix[RowSz][ColSz];
 
 } // namespace mkshft_ledMatrix
 

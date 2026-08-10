@@ -39,6 +39,7 @@ const long readInputPeriodUs =
     1000L; // microseconds between dial + button scanning cycle
 const long ledRenderPeriodUs =
     26667L; // microseconds between LED animation frames
+constexpr uint32_t usbIdleSleepDelayMs = 5UL * 60UL * 1000UL;
  
 
 /*
@@ -47,7 +48,6 @@ const long ledRenderPeriodUs =
 unsigned int packetCount = 0;
 
 IntervalTimer readInputTimer;
-IntervalTimer ledRenderTimer;
 
 // State tracking
 core::state_t stateCurr;
@@ -57,6 +57,9 @@ core::state_t statePrev;
 uint8_t stateDelta = 0;
 bool stateChanged = false;
 uint8_t row, col;
+uint32_t usbUnavailableSince = 0;
+bool usbUnavailableTimerActive = false;
+bool usbIdleSleeping = false;
 
 // Layout *baseLayout;
 // LoadingBar *testBar;
@@ -68,6 +71,65 @@ void onPacketReceived(const uint8_t *, size_t);
 void handleSymExp(std::string);
 void ledUpdate();
 void testWidgets();
+
+void enterUsbIdleSleep() {
+  if (usbIdleSleeping) return;
+
+  readInputTimer.end();
+  mkshft_ledMatrix::setEnabled(false);
+  mkshft_display::setSleeping(true);
+  usbIdleSleeping = true;
+}
+
+void exitUsbIdleSleep() {
+  if (!usbIdleSleeping) return;
+
+  mkshft_ledMatrix::setEnabled(true);
+  mkshft_ui::showHomeScreen();
+  mkshft_display::setSleeping(false);
+  readInputTimer.begin(core::updateState, readInputPeriodUs);
+  usbIdleSleeping = false;
+}
+
+void updateUsbIdleState(bool usbConnected) {
+  if (usbConnected) {
+    usbUnavailableTimerActive = false;
+    exitUsbIdleSleep();
+    return;
+  }
+
+  if (!usbUnavailableTimerActive) {
+    usbUnavailableSince = millis();
+    usbUnavailableTimerActive = true;
+    return;
+  }
+
+  if (!usbIdleSleeping &&
+      millis() - usbUnavailableSince >= usbIdleSleepDelayMs) {
+    enterUsbIdleSleep();
+  }
+}
+
+uint16_t buttonMask(const core::state_t &state) {
+  uint16_t mask = 0;
+  for (uint8_t i = 0; i < core::szButtonArray; ++i) {
+    if (state.button[i]) mask |= static_cast<uint16_t>(1U << i);
+  }
+  return mask;
+}
+
+void traceButtonEdge(uint8_t buttonIndex, bool pressed, int8_t pixelIndex) {
+  if (!mkshft_ctrl::connected) return;
+  char trace[128] = {};
+  snprintf(trace, sizeof(trace),
+           "MKDBG EDGE t=%lu button=%u state=%u mask=%04X raw=%04X LED uart=%u pad=%04lX pixel=%d active=%04X",
+           millis(), buttonIndex, pressed ? 1 : 0, buttonMask(stateCurr),
+           stateCurr.buttonExtended[buttonIndex],
+           mkshft_ledMatrix::isReady() ? 1 : 0,
+           static_cast<unsigned long>(mkshft_ledMatrix::outputPadConfig()), pixelIndex,
+           mkshft_ledMatrix::activePhysicalMask());
+  mkshft_ctrl::sendString(trace);
+}
 
 void setup()
 {
@@ -133,7 +195,7 @@ void setup()
 
   mkshft_ctrl::sendLine("MKSHFT:: Successfully started state scanning timer.");
 
-  ledRenderTimer.begin(ledUpdate, ledRenderPeriodUs);
+
 
   // testWidgets();
 
@@ -164,6 +226,12 @@ void loop()
   if (usbConnected != mkshft_ctrl::connected) {
     mkshft_ctrl::connected = usbConnected;
     mkshft_ui::setUsbConnected(usbConnected);
+    if (usbConnected) mkshft_ctrl::sendString("MKDBG LINK connected");
+  }
+  updateUsbIdleState(usbConnected);
+  if (usbIdleSleeping) {
+    mkshft_ctrl::update();
+    return;
   }
 
   statePrev = stateCurr;
@@ -182,7 +250,20 @@ void loop()
       mkshft_ui::showHomeScreen();
     }
   }
-  mkshft_ui::updateGameCarouselTimeout();
+  if (mkshft_ui::updateGameCarouselTimeout()) {
+    mkshft_ctrl::sendString("GAME_PRELOAD_FIRST");
+  }
+  mkshft_ui::updateOverlayTimeout();
+  mkshft_ui::updateNowPlayingTicker();
+
+  if (statePrev.button[3] != stateCurr.button[3] &&
+      stateCurr.button[3] == core::ON) {
+    mkshft_ctrl::sendString("GOXLR_NEXT");
+  }
+  if (stateCurr.dialRelative[3] != 0) {
+    mkshft_ctrl::sendString(std::string("GOXLR_ADJUST:") +
+                            std::to_string(stateCurr.dialRelative[3]));
+  }
 
   // check button states
   for (int i = 0; i < core::szButtonArray; i++)
@@ -192,15 +273,11 @@ void loop()
     // Serial.print(" state check ");
     // Serial.print(mkshft_ledMatrix::ledMatrix[row][col].triggeredSeqIdx);
     // Serial.println();
-    row = core::ButtonLookup[i][0];
-    col = core::ButtonLookup[i][1];
     if (statePrev.button[i] != stateCurr.button[i])
     {
-      mkshft_ledMatrix::ledMatrix[row][col].triggeredSeqIdx =
-          stateCurr.button[i] == core::ON ? Pixel::RISE : Pixel::FALL;
-      if (i == 4 && stateCurr.button[i] == core::ON) {
-        mkshft_ui::showPlayPauseGlyph();
-      }
+      const bool pressed = stateCurr.button[i] == core::ON;
+      const int8_t pixelIndex = mkshft_ledMatrix::setButtonState(i, pressed);
+      traceButtonEdge(i, pressed, pixelIndex);
       stateChanged = true;
     }
     // if (stateCurr.button[15] == true) {
@@ -213,11 +290,6 @@ void loop()
   {
     if (stateCurr.dialRelative[i] != 0)
     {
-      const uint8_t dialRow = core::ButtonLookup[i][0];
-      const uint8_t dialCol = core::ButtonLookup[i][1];
-      mkshft_ledMatrix::ledMatrix[dialRow][dialCol].triggeredSeqIdx =
-          stateCurr.dialRelative[i] < 0 ? Pixel::TURN_LEFT
-                                        : Pixel::TURN_RIGHT;
       stateChanged = true;
 
       // if (i == 1)
@@ -244,6 +316,8 @@ void loop()
       stateToSend.dialRelative[0] = 0;
       stateToSend.button[0] = false;
     }
+    stateToSend.dialRelative[3] = 0;
+    stateToSend.button[3] = false;
     mkshft_ctrl::sendState(stateToSend);
     // core::printStateToSerial(core::getState());
   }
@@ -256,8 +330,7 @@ void loop()
 void ledUpdate()
 {
 #ifdef LED_H_
-  mkshft_ledMatrix::updateState();
-  mkshft_ledMatrix::showMatrix();
+  mkshft_ledMatrix::update();
 #endif
 }
 
@@ -328,18 +401,21 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     mkshft_ui::setUsbConnected(false);
     break;
   case MessageType::GAME_CARD_BEGIN: {
-    // width:u16, height:u16, titleLength:u8, title:utf8
-    if (bufSz < 6) {
+    // slot:u8, gameIndex:u8, width:u16, height:u16, titleLength:u8, title:utf8
+    if (bufSz < 8) {
       sendByte(MessageType::ERROR);
       break;
     }
-    const uint16_t width = (buffer[1] << 8) | buffer[2];
-    const uint16_t height = (buffer[3] << 8) | buffer[4];
-    const uint8_t titleLength = buffer[5];
+    const uint8_t slot = buffer[1];
+    const uint8_t gameIndex = buffer[2];
+    const uint16_t width = (buffer[3] << 8) | buffer[4];
+    const uint16_t height = (buffer[5] << 8) | buffer[6];
+    const uint8_t titleLength = buffer[7];
     const bool validLength =
-        titleLength > 0 && bufSz == static_cast<size_t>(6 + titleLength);
+        titleLength > 0 && bufSz == static_cast<size_t>(8 + titleLength);
     if (!validLength ||
-        !mkshft_ui::beginGameCard(reinterpret_cast<const char *>(buffer + 6),
+        !mkshft_ui::beginGameCard(slot, gameIndex,
+                                  reinterpret_cast<const char *>(buffer + 8),
                                   titleLength, width, height)) {
       sendByte(MessageType::ERROR);
       break;
@@ -396,6 +472,35 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   case MessageType::GAME_LIST_COMMIT:
     sendByte(mkshft_ui::commitGameList() ? MessageType::ACK
                                          : MessageType::ERROR);
+    break;
+  case MessageType::GOXLR_STATUS: {
+    // mode:u8 (0 selected, 1 adjusted), percent:u8, name:utf8
+    if (bufSz < 4) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    mkshft_ui::showGoXlrStatus(buffer[1] != 0,
+                               reinterpret_cast<const char *>(buffer + 3),
+                               bufSz - 3, min<uint8_t>(buffer[2], 100));
+    sendByte(MessageType::ACK);
+    break;
+  }
+  case MessageType::NOW_PLAYING:
+    if (bufSz <= 2 || bufSz > 161 || buffer[1] > 1) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    mkshft_ui::setNowPlaying(buffer[1] != 0,
+                             reinterpret_cast<const char *>(buffer + 2),
+                             bufSz - 2);
+    sendByte(MessageType::ACK);
+    break;
+  case MessageType::ACTION_GLYPH:
+    if (bufSz != 2 || !mkshft_ui::showActionGlyph(buffer[1])) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    sendByte(MessageType::ACK);
     break;
   default:
     break;

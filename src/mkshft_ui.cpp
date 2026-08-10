@@ -5,11 +5,21 @@ namespace mkshft_ui {
 Layout *currentLayout;
 std::map<std::string, Layout> layouts;
 
-DMAMEM uint16_t gameArtwork[GAME_ART_MAX_WIDTH * GAME_ART_MAX_HEIGHT];
+DMAMEM uint16_t gameArtwork[GAME_ART_CACHE_SLOTS]
+                              [GAME_ART_MAX_WIDTH * GAME_ART_MAX_HEIGHT];
+struct ArtworkSlot {
+  uint8_t gameIndex;
+  uint16_t width;
+  uint16_t height;
+  bool valid;
+};
+ArtworkSlot artworkSlots[GAME_ART_CACHE_SLOTS] = {};
 char gameTitle[GAME_TITLE_MAX_LENGTH + 1] = {};
 uint16_t gameArtWidth = 0;
 uint16_t gameArtHeight = 0;
 uint32_t gamePixelsReceived = 0;
+uint8_t gameTransferIndex = 0;
+uint8_t gameTransferSlot = 0;
 bool gameTransferActive = false;
 bool gameCardVisible = false;
 bool usbConnected = false;
@@ -27,114 +37,145 @@ bool localGameCarouselActive = false;
 uint32_t gameCardLastInteractionMs = 0;
 bool actionGlyphVisible = false;
 uint32_t actionGlyphShownMs = 0;
+bool goXlrVisible = false;
+uint32_t goXlrShownMs = 0;
+char goXlrChannelLabel[33] = "Chromecast";
+uint8_t goXlrChannelPercent = 0;
+bool goXlrPercentKnown = false;
+constexpr size_t NOW_PLAYING_MAX_LENGTH = 160;
+char nowPlaying[NOW_PLAYING_MAX_LENGTH + 1] = {};
+bool nowPlayingActive = false;
+int nowPlayingOffset = 0;
+uint32_t nowPlayingLastFrameMs = 0;
+uint32_t nowPlayingHoldUntilMs = 0;
+bool nowPlayingHoldingAtEnd = false;
 
 constexpr uint32_t GAME_CARD_TIMEOUT_MS = 5000;
 constexpr uint32_t ACTION_GLYPH_TIMEOUT_MS = 1500;
+constexpr uint32_t GOXLR_TIMEOUT_MS = 3000;
 
 namespace {
-void drawGameTitle(const char *title) {
-  constexpr size_t lineLength = 17;
-  char line[lineLength + 1] = {};
-  size_t source = 0;
-  int y = 82;
+int textWidth(const char *text) {
+  int width = 0;
+  for (const char *cursor = text; *cursor != '\0'; ++cursor) {
+    int advance = 0;
+    defaultCanvas->measureChar(*cursor, iVec2(0, 0), *baseFont,
+                               DEFAULT_TEXT_ANCHOR, &advance);
+    width += advance;
+  }
+  return width;
+}
 
-  for (uint8_t lineNumber = 0; lineNumber < 3 && title[source] != '\0';
-       ++lineNumber) {
-    size_t count = 0;
-    while (count < lineLength && title[source] != '\0') {
-      line[count++] = title[source++];
+void drawNowPlayingTicker() {
+  if (!usbConnected || !nowPlayingActive || nowPlaying[0] == '\0' ||
+      gameCardVisible)
+    return;
+  constexpr int top = 11;
+  constexpr int bottom = 31;
+  constexpr int availableWidth = 304;
+  const int width = textWidth(nowPlaying);
+  const int x = width <= availableWidth ? (320 - width) / 2
+                                        : 8 - nowPlayingOffset;
+  defaultCanvas->fillRect(iBox2(0, 319, top, bottom), RGB32(8, 13, 18));
+  defaultCanvas->drawText(nowPlaying, iVec2(x, 27),
+                          *baseFont, RGB32(245, 240, 220));
+}
+
+void drawPersistentGoXlrLabel() {
+  if (!usbConnected || !goXlrPercentKnown) return;
+  constexpr int right = 311;
+  constexpr int labelBaseline = 230;
+  char percent[8] = {};
+  snprintf(percent, sizeof(percent), "%u%%", goXlrChannelPercent);
+  const int labelWidth = textWidth(goXlrChannelLabel);
+  const int percentWidth = textWidth(percent);
+  // Always clear the full badge width so a shorter channel name cannot leave
+  // pixels behind from a previous label such as "Chromecast".
+  defaultCanvas->fillRect(iBox2(196, 319, 190, 239), RGB32(8, 13, 18));
+  defaultCanvas->drawText(percent, iVec2(right - percentWidth, 207),
+                          *baseFont, RGB32(245, 240, 220));
+  defaultCanvas->drawText(goXlrChannelLabel,
+                          iVec2(right - labelWidth, labelBaseline),
+                          *baseFont, RGB32(216, 58, 4));
+}
+
+void drawGameTitle(const char *title) {
+  constexpr size_t maxChars = 32;
+  char lines[2][maxChars + 1] = {};
+  const char *cursor = title;
+  uint8_t lineCount = 0;
+
+  while (*cursor != '\0' && lineCount < 2) {
+    while (*cursor == ' ') ++cursor;
+    const size_t remaining = strlen(cursor);
+    size_t count = min(remaining, maxChars);
+    if (remaining > maxChars) {
+      size_t breakAt = count;
+      while (breakAt > 0 && cursor[breakAt] != ' ') --breakAt;
+      if (breakAt > 0) count = breakAt;
     }
-    line[count] = '\0';
-    defaultCanvas->drawText(line, iVec2(192, y), *baseFont,
+    memcpy(lines[lineCount], cursor, count);
+    lines[lineCount][count] = '\0';
+    cursor += count;
+    ++lineCount;
+  }
+
+  while (*cursor == ' ') ++cursor;
+  if (*cursor != '\0' && lineCount > 0) {
+    char *last = lines[lineCount - 1];
+    const size_t length = strlen(last);
+    if (length >= 3) memcpy(last + length - 3, "...", 3);
+  }
+
+  const int firstY = lineCount == 1 ? 34 : 22;
+  for (uint8_t line = 0; line < lineCount; ++line) {
+    const int x = max(8, (320 - textWidth(lines[line])) / 2);
+    defaultCanvas->drawText(lines[line], iVec2(x, firstY + line * 18), *baseFont,
                             RGB32(245, 240, 220));
-    y += 24;
   }
 }
 
-void renderGameCard(bool artworkReady) {
+int8_t findArtworkSlot(uint8_t gameIndex) {
+  for (uint8_t slot = 0; slot < GAME_ART_CACHE_SLOTS; ++slot) {
+    if (artworkSlots[slot].valid && artworkSlots[slot].gameIndex == gameIndex)
+      return slot;
+  }
+  return -1;
+}
+
+void renderGameCard(int8_t slot) {
   defaultCanvas->fillRect(iBox2(0, 319, 0, 239), RGB32(8, 13, 18));
   defaultCanvas->fillRect(iBox2(0, 319, 0, 9), RGB32(255, 184, 77));
-  defaultCanvas->drawText("GAME LIBRARY", iVec2(24, 31), *baseFont,
-                          RGB32(255, 184, 77));
+  drawGameTitle(gameTitle);
 
-  const int artX = 16;
-  const int artY = 48;
-  defaultCanvas->fillRect(iBox2(12, 179, 44, 211), RGB32(18, 29, 38));
-  if (artworkReady) {
-    Image<RGB565> artwork(gameArtwork, gameArtWidth, gameArtHeight);
-    for (int y = 0; y < 160; ++y) {
-      const int sourceY = (y * gameArtHeight) / 160;
-      for (int x = 0; x < 160; ++x) {
-        const int sourceX = (x * gameArtWidth) / 160;
+  constexpr int artSize = 150;
+  constexpr int artX = (320 - artSize) / 2;
+  constexpr int artY = 50;
+  defaultCanvas->fillRect(iBox2(artX - 3, artX + artSize + 2,
+                                artY - 3, artY + artSize + 2),
+                          RGB32(18, 29, 38));
+  if (slot >= 0 && artworkSlots[slot].valid) {
+    const uint16_t width = artworkSlots[slot].width;
+    const uint16_t height = artworkSlots[slot].height;
+    Image<RGB565> artwork(gameArtwork[slot], width, height);
+    for (int y = 0; y < artSize; ++y) {
+      const int sourceY = (y * height) / artSize;
+      for (int x = 0; x < artSize; ++x) {
+        const int sourceX = (x * width) / artSize;
         defaultCanvas->drawPixel<false>(iVec2(artX + x, artY + y),
                                         artwork(sourceX, sourceY));
       }
     }
   } else {
-    defaultCanvas->drawText("LOADING ART", iVec2(48, 132), *baseFont,
+    defaultCanvas->drawText("LOADING ART", iVec2(112, 130), *baseFont,
                             RGB32(151, 166, 175));
   }
 
-  drawGameTitle(gameTitle);
-  defaultCanvas->drawText("<  TURN  >", iVec2(192, 174), *baseFont,
-                          RGB32(151, 166, 175));
-  defaultCanvas->drawText("PRESS TO PLAY", iVec2(192, 204), *baseFont,
+  const char *action = "CLICK TO PLAY";
+  defaultCanvas->drawText(action, iVec2((320 - textWidth(action)) / 2, 226), *baseFont,
                           RGB32(42, 214, 168));
 }
 
-void renderTextGameTitle() {
-  defaultCanvas->fillRect(iBox2(20, 299, 54, 171), RGB32(18, 29, 38));
-
-  const GFXfont &titleFont = iosevka_mkshft_regular9pt7b;
-  constexpr size_t lineLength = 25;
-  char lines[3][lineLength + 1] = {};
-  uint8_t lineCount = 0;
-  const char *cursor = gameTitle;
-
-  while (*cursor != '\0' && lineCount < 3) {
-    while (*cursor == ' ') ++cursor;
-    size_t used = 0;
-    while (*cursor != '\0') {
-      const char *wordStart = cursor;
-      while (*cursor != '\0' && *cursor != ' ') ++cursor;
-      const size_t wordLength = cursor - wordStart;
-      const size_t separator = used == 0 ? 0 : 1;
-      if (used > 0 && used + separator + wordLength > lineLength) break;
-      if (separator) lines[lineCount][used++] = ' ';
-      const size_t copyLength = min(wordLength, lineLength - used);
-      memcpy(lines[lineCount] + used, wordStart, copyLength);
-      used += copyLength;
-      if (copyLength < wordLength) cursor = wordStart + copyLength;
-      while (*cursor == ' ') ++cursor;
-      if (used == lineLength) break;
-    }
-    lines[lineCount][used] = '\0';
-    ++lineCount;
-  }
-
-  const int firstY = 87 + ((3 - lineCount) * 14);
-  for (uint8_t line = 0; line < lineCount; ++line) {
-    int advance = 0;
-    defaultCanvas->measureChar('A', iVec2(0, 0), titleFont,
-                               DEFAULT_TEXT_ANCHOR, &advance);
-    const int x = max(12, (320 - static_cast<int>(strlen(lines[line])) * advance) / 2);
-    defaultCanvas->drawText(lines[line], iVec2(x, firstY + line * 30),
-                            titleFont, RGB32(245, 240, 220));
-  }
-}
-
-void renderTextGameCard() {
-  defaultCanvas->fillRect(iBox2(0, 319, 0, 239), RGB32(8, 13, 18));
-  defaultCanvas->fillRect(iBox2(0, 319, 0, 9), RGB32(255, 184, 77));
-  defaultCanvas->drawText("GAME LIBRARY", iVec2(24, 31), *baseFont,
-                          RGB32(255, 184, 77));
-  renderTextGameTitle();
-
-  defaultCanvas->drawText("< TURN >", iVec2(36, 204), *baseFont,
-                          RGB32(151, 166, 175));
-  defaultCanvas->drawText("PRESS TO PLAY", iVec2(174, 204), *baseFont,
-                          RGB32(42, 214, 168));
-}
 } // namespace
 
 template <class T> bool Layout::addWidget(T w) {
@@ -303,6 +344,8 @@ void renderUI() {
 void splashScreen() {
   defaultCanvas->blit(splash565, iVec2(0, 0));
   setUsbConnected(usbConnected);
+  drawNowPlayingTicker();
+  drawPersistentGoXlrLabel();
 
   // currentLayout->addWidget(WTriangle("testTriangle", iVec2(0,0), iVec2(50,0), iVec2(0,50)));
   // currentLayout->triangles.at("testTriangle")
@@ -351,7 +394,20 @@ void splashScreen() {
 
 void setUsbConnected(bool connected) {
   usbConnected = connected;
-  if (gameCardVisible || actionGlyphVisible) {
+  if (!connected) {
+    goXlrPercentKnown = false;
+    goXlrChannelLabel[0] = '\0';
+    goXlrChannelPercent = 0;
+    nowPlayingActive = false;
+    nowPlaying[0] = '\0';
+    nowPlayingOffset = 0;
+    nowPlayingLastFrameMs = 0;
+    nowPlayingHoldUntilMs = 0;
+    nowPlayingHoldingAtEnd = false;
+    if (!gameCardVisible && !actionGlyphVisible)
+      defaultCanvas->fillRect(iBox2(196, 319, 190, 239), RGB32(8, 13, 18));
+  }
+  if (gameCardVisible || actionGlyphVisible || goXlrVisible) {
     return;
   }
   defaultCanvas->fillRect(iBox2(0, 319, 0, 9),
@@ -359,30 +415,27 @@ void setUsbConnected(bool connected) {
                                     : RGB32(72, 24, 8));
 }
 
-bool beginGameCard(const char *title, size_t titleLength, uint16_t width,
-                   uint16_t height) {
+bool beginGameCard(uint8_t slot, uint8_t gameIndex, const char *title,
+                   size_t titleLength, uint16_t width, uint16_t height) {
   const bool textOnly = width == 0 && height == 0;
   const bool validArtworkSize = width > 0 && height > 0 &&
                                 width <= GAME_ART_MAX_WIDTH &&
                                 height <= GAME_ART_MAX_HEIGHT;
-  if (title == nullptr || titleLength == 0 ||
+  if (slot >= GAME_ART_CACHE_SLOTS || gameIndex >= cachedGameCount ||
+      title == nullptr || titleLength == 0 ||
       titleLength > GAME_TITLE_MAX_LENGTH ||
       (!textOnly && !validArtworkSize)) {
     gameTransferActive = false;
     return false;
   }
 
-  memcpy(gameTitle, title, titleLength);
-  gameTitle[titleLength] = '\0';
   gameArtWidth = width;
   gameArtHeight = height;
   gamePixelsReceived = 0;
+  gameTransferIndex = gameIndex;
+  gameTransferSlot = slot;
+  artworkSlots[slot].valid = false;
   gameTransferActive = !textOnly;
-  gameCardVisible = true;
-  actionGlyphVisible = false;
-  gameCardLastInteractionMs = millis();
-  if (textOnly) renderTextGameCard();
-  else renderGameCard(false);
   return true;
 }
 
@@ -401,7 +454,7 @@ bool writeGameArtChunk(uint32_t pixelOffset, const uint8_t *data,
   }
 
   for (uint32_t index = 0; index < pixelCount; ++index) {
-    gameArtwork[pixelOffset + index] =
+    gameArtwork[gameTransferSlot][pixelOffset + index] =
         (static_cast<uint16_t>(data[index * 2]) << 8) | data[index * 2 + 1];
   }
   gamePixelsReceived += pixelCount;
@@ -415,9 +468,12 @@ bool commitGameCard() {
   }
 
   gameTransferActive = false;
-  gameCardVisible = true;
-  gameCardLastInteractionMs = millis();
-  renderGameCard(true);
+  artworkSlots[gameTransferSlot] = {gameTransferIndex, gameArtWidth,
+                                    gameArtHeight, true};
+  if (gameCardVisible && gameTransferIndex == selectedGameIndex) {
+    gameCardLastInteractionMs = millis();
+    renderGameCard(gameTransferSlot);
+  }
   return true;
 }
 
@@ -428,6 +484,8 @@ void showHomeScreen() {
   gameCardLastInteractionMs = 0;
   actionGlyphVisible = false;
   actionGlyphShownMs = 0;
+  goXlrVisible = false;
+  goXlrShownMs = 0;
   splashScreen();
   setUsbConnected(wasUsbConnected);
 }
@@ -437,6 +495,7 @@ bool beginGameList(uint8_t expectedCount) {
   expectedGameCount = expectedCount;
   cachedGameCount = 0;
   localGameCarouselActive = false;
+  for (auto &slot : artworkSlots) slot.valid = false;
   return true;
 }
 
@@ -479,11 +538,10 @@ void moveLocalGameSelection(int delta) {
   gameCardVisible = true;
   gameTransferActive = false;
   gameCardLastInteractionMs = millis();
-  if (wasVisible) renderTextGameTitle();
-  else renderTextGameCard();
+  renderGameCard(findArtworkSlot(selectedGameIndex));
 }
 
-void updateGameCarouselTimeout() {
+bool updateGameCarouselTimeout() {
   const uint32_t now = millis();
   const bool gameExpired = gameCardVisible && gameCardLastInteractionMs != 0 &&
       static_cast<uint32_t>(now - gameCardLastInteractionMs) >=
@@ -494,25 +552,113 @@ void updateGameCarouselTimeout() {
   if (gameExpired || actionExpired) {
     showHomeScreen();
   }
+  return gameExpired;
 }
 
-void showPlayPauseGlyph() {
+void updateOverlayTimeout() {
+  if (goXlrVisible && goXlrShownMs != 0 &&
+      static_cast<uint32_t>(millis() - goXlrShownMs) >= GOXLR_TIMEOUT_MS) {
+    showHomeScreen();
+  }
+}
+
+void showGoXlrStatus(bool adjusting, const char *name, size_t nameLength,
+                     uint8_t percent) {
+  char label[33] = {};
+  const size_t copyLength = min(nameLength, sizeof(label) - 1);
+  memcpy(label, name, copyLength);
+  memcpy(goXlrChannelLabel, label, copyLength + 1);
+  goXlrChannelPercent = min<uint8_t>(percent, 100);
+  goXlrPercentKnown = true;
+  goXlrVisible = false;
+  goXlrShownMs = 0;
+  drawPersistentGoXlrLabel();
+}
+
+bool showActionGlyph(uint8_t glyphId) {
+  if (glyphId < 1 || glyphId > 3) return false;
   gameTransferActive = false;
   gameCardVisible = false;
   actionGlyphVisible = true;
   actionGlyphShownMs = millis();
 
-  const RGB32 background(8, 13, 18);
+  const RGB32 panel(13, 20, 26);
+  const RGB32 panelEdge(54, 66, 74);
   const RGB32 orange(216, 58, 4);
   const RGB32 foreground(245, 240, 220);
-  defaultCanvas->fillRect(iBox2(0, 319, 0, 239), background);
-  defaultCanvas->fillRect(iBox2(0, 319, 0, 9),
-                          usbConnected ? orange : RGB32(72, 24, 8));
-  defaultCanvas->drawText("MEDIA", iVec2(132, 42), *baseFont, orange);
-  defaultCanvas->fillTriangle(iVec2(67, 76), iVec2(67, 178),
-                              iVec2(151, 127), foreground, foreground, 1.0f);
-  defaultCanvas->fillRect(iBox2(184, 211, 76, 178), foreground);
-  defaultCanvas->fillRect(iBox2(231, 258, 76, 178), foreground);
+  constexpr int left = 68;
+  constexpr int right = 251;
+  constexpr int top = 47;
+  constexpr int bottom = 184;
+  defaultCanvas->fillRect(iBox2(left, right, top, bottom), panelEdge);
+  defaultCanvas->fillRect(iBox2(left + 3, right - 3, top + 3, bottom - 3), panel);
+  defaultCanvas->fillRect(iBox2(left + 3, right - 3, top + 3, top + 8), orange);
+
+  const char *title = glyphId == 1 ? "PREVIOUS"
+                      : glyphId == 3 ? "NEXT"
+                                     : "MEDIA";
+  defaultCanvas->drawText(title, iVec2((320 - textWidth(title)) / 2, 77),
+                          *baseFont, orange);
+  if (glyphId == 1) {
+    defaultCanvas->fillRect(iBox2(92, 105, 101, 157), foreground);
+    defaultCanvas->fillTriangle(iVec2(155, 101), iVec2(155, 157),
+                                iVec2(108, 129), foreground, foreground, 1.0f);
+    defaultCanvas->fillTriangle(iVec2(211, 101), iVec2(211, 157),
+                                iVec2(164, 129), foreground, foreground, 1.0f);
+  } else if (glyphId == 3) {
+    defaultCanvas->fillTriangle(iVec2(108, 101), iVec2(108, 157),
+                                iVec2(155, 129), foreground, foreground, 1.0f);
+    defaultCanvas->fillTriangle(iVec2(164, 101), iVec2(164, 157),
+                                iVec2(211, 129), foreground, foreground, 1.0f);
+    defaultCanvas->fillRect(iBox2(214, 227, 101, 157), foreground);
+  } else {
+    defaultCanvas->fillTriangle(iVec2(94, 101), iVec2(94, 157),
+                                iVec2(140, 129), foreground, foreground, 1.0f);
+    defaultCanvas->fillRect(iBox2(169, 184, 101, 157), foreground);
+    defaultCanvas->fillRect(iBox2(199, 214, 101, 157), foreground);
+  }
+  return true;
+}
+
+void setNowPlaying(bool playing, const char *text, size_t textLength) {
+  if (text == nullptr || textLength == 0 || textLength > NOW_PLAYING_MAX_LENGTH)
+    return;
+  memcpy(nowPlaying, text, textLength);
+  nowPlaying[textLength] = '\0';
+  nowPlayingOffset = 0;
+  const uint32_t now = millis();
+  nowPlayingLastFrameMs = now;
+  nowPlayingHoldUntilMs = now + 700;
+  nowPlayingHoldingAtEnd = false;
+  const bool wasActive = nowPlayingActive;
+  nowPlayingActive = playing;
+  if (!playing && wasActive && !gameCardVisible && !actionGlyphVisible) splashScreen();
+  else if (playing) drawNowPlayingTicker();
+}
+
+void updateNowPlayingTicker() {
+  const uint32_t now = millis();
+  if (!nowPlayingActive || gameCardVisible || nowPlaying[0] == '\0' ||
+      static_cast<uint32_t>(now - nowPlayingLastFrameMs) < 55)
+    return;
+  nowPlayingLastFrameMs = now;
+  const int width = textWidth(nowPlaying);
+  if (width <= 304) return;
+  if (static_cast<int32_t>(now - nowPlayingHoldUntilMs) < 0) return;
+  if (nowPlayingHoldingAtEnd) {
+    nowPlayingOffset = 0;
+    nowPlayingHoldingAtEnd = false;
+    nowPlayingHoldUntilMs = now + 700;
+    drawNowPlayingTicker();
+    return;
+  }
+  const int maxOffset = width - 304;
+  nowPlayingOffset = min(nowPlayingOffset + 2, maxOffset);
+  drawNowPlayingTicker();
+  if (nowPlayingOffset == maxOffset) {
+    nowPlayingHoldingAtEnd = true;
+    nowPlayingHoldUntilMs = now + 1200;
+  }
 }
 
 const char *selectedGameAppId() {

@@ -33,6 +33,9 @@ enum MessageType {
   GAME_LIST_BEGIN,
   GAME_LIST_ITEM,
   GAME_LIST_COMMIT,
+  GOXLR_STATUS,
+  NOW_PLAYING,
+  ACTION_GLYPH,
 };
 
 extern bool connected;
