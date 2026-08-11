@@ -34,8 +34,10 @@ void renderStates() {
 void init() {
   driverReady = strip.begin();
 #if defined(__IMXRT1062__)
-  // Preserve the UART mux while matching the original GPIO drive strength.
-  *portControlRegister(LED_PIN) = IOMUXC_PAD_DSE(7);
+  // Only touch drive strength; overwriting the entire pad register can change
+  // edge timing and push WS2812 signaling out of tolerance.
+  volatile uint32_t *const padRegister = portControlRegister(LED_PIN);
+  *padRegister = (*padRegister & ~IOMUXC_PAD_DSE(7)) | IOMUXC_PAD_DSE(7);
 #endif
   strip.clear();
   if (driverReady) {
@@ -130,6 +132,10 @@ void colorStripPixel(uint8_t row, uint8_t col, uint8_t r, uint8_t g,
   if (!outputEnabled) return;
   strip.setPixel(MatrixLookup[row][col], r, g, b);
   if (driverReady) strip.show();
+}
+
+void colorStripPixel(uint8_t row, uint8_t col, Color color) {
+  colorStripPixel(row, col, color.r, color.g, color.b);
 }
 
 } // namespace mkshft_ledMatrix

@@ -1,4 +1,4 @@
 #include <fonts.hpp>
 inline namespace fonts {
-const GFXfont *baseFont = defFont(thin8);
+const GFXfont *baseFont = defAdafruitFont(FreeSans9pt7b);
 }

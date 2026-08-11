@@ -84,12 +84,18 @@ void setSleeping(bool sleeping) {
   if (!displayReady || displaySleeping == sleeping) return;
 
   if (sleeping) {
-    tft.sleep(true);
+    // The MakeShift hardware does not expose a software-controlled LCD
+    // backlight here. Putting only the controller to sleep can leave the
+    // backlight powered and make the panel glow bright white, so push a black
+    // frame instead and stop further updates until wake.
+    memset(fb, 0, sizeof(fb));
+    tft.update(fb, true);
     displaySleeping = true;
+    fullUpdate = false;
+    lastRenderTime = millis();
     return;
   }
 
-  tft.sleep(false);
   displaySleeping = false;
   fullUpdate = true;
   tft.update(fb, true);

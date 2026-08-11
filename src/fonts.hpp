@@ -5,6 +5,7 @@
 #include <tgx.h>
 #include <map>
 #include <string>
+#include <Fonts/FreeSans9pt7b.h>
 
 #include <fonts/iosevka-mkshft-thin8pt7b.h>
 #include <fonts/iosevka-mkshft-bold8pt7b.h>
@@ -15,6 +16,7 @@
 inline namespace fonts {
 
 #define defFont(STYLE) &iosevka_mkshft_##STYLE##pt7b
+#define defAdafruitFont(NAME) &NAME
 
 extern const GFXfont * baseFont;
 // Note to self: const <T>* is a non-constant pointer to a constant type,
