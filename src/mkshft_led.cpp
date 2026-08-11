@@ -4,9 +4,10 @@
 #include <mkshft_core.hpp>
 namespace mkshft_ledMatrix {
 namespace {
-byte drawingMemory[StripSz * 3] = {};
-DMAMEM byte displayMemory[StripSz * 12] = {};
-WS2812Serial strip(StripSz, displayMemory, drawingMemory, LED_PIN, WS2812_GRB);
+byte drawingMemory[PhysicalStripSz * 3] = {};
+DMAMEM byte displayMemory[PhysicalStripSz * 12] = {};
+WS2812Serial strip(PhysicalStripSz, displayMemory, drawingMemory, LED_PIN,
+                   WS2812_GRB);
 bool states[StripSz] = {};
 bool driverReady = false;
 bool outputEnabled = true;
@@ -15,6 +16,32 @@ uint16_t physicalMask = 0;
 constexpr uint8_t peakR = 216;
 constexpr uint8_t peakG = 58;
 constexpr uint8_t peakB = 4;
+constexpr uint16_t bootSequenceStepDelayMs = 120;
+
+void clearPhysicalStrip() {
+  for (uint8_t physicalIndex = 0; physicalIndex < PhysicalStripSz;
+       ++physicalIndex) {
+    strip.setPixel(physicalIndex, 0, 0, 0);
+  }
+}
+
+void runBootSequence() {
+  if (!driverReady || !outputEnabled) return;
+
+  // Sweep raw physical LED indices to separate strip propagation problems
+  // from the current 16-button logical mapping.
+  for (uint8_t physicalIndex = 0; physicalIndex < PhysicalStripSz;
+       ++physicalIndex) {
+    clearPhysicalStrip();
+    strip.setPixel(physicalIndex, peakR, peakG, peakB);
+    strip.show();
+    delay(bootSequenceStepDelayMs);
+  }
+
+  clearPhysicalStrip();
+  strip.show();
+  delay(bootSequenceStepDelayMs);
+}
 
 void renderStates() {
   physicalMask = 0;
@@ -39,10 +66,11 @@ void init() {
   volatile uint32_t *const padRegister = portControlRegister(LED_PIN);
   *padRegister = (*padRegister & ~IOMUXC_PAD_DSE(7)) | IOMUXC_PAD_DSE(7);
 #endif
-  strip.clear();
+  clearPhysicalStrip();
   if (driverReady) {
     strip.show();
     delay(1);
+    runBootSequence();
   }
 }
 
@@ -76,7 +104,7 @@ void setEnabled(bool enabled) {
   outputEnabled = enabled;
   physicalMask = 0;
   for (bool &state : states) state = false;
-  strip.clear();
+  clearPhysicalStrip();
   if (driverReady) strip.show();
 }
 
@@ -108,7 +136,7 @@ void post() {
   // color indicators
   for (uint8_t i = 0; i != 125; i++) {
     const Color color = {gamma8[i], 0, gamma8[i]};
-    for (int n = 0; n < StripSz; n++) {
+    for (int n = 0; n < PhysicalStripSz; n++) {
       strip.setPixelColor(n, color.r, color.g, color.b);
     }
     strip.show();
@@ -116,7 +144,7 @@ void post() {
   }
   for (uint8_t i = 125; i != 255; i--) {
     const Color color = {gamma8[i], 0, gamma8[i]};
-    for (int n = 0; n < StripSz; n++) {
+    for (int n = 0; n < PhysicalStripSz; n++) {
       strip.setPixelColor(n, color.r, color.g, color.b);
     }
     strip.show();

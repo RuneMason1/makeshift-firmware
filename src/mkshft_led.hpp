@@ -9,6 +9,7 @@ const uint8_t LED_PIN = 8;
 const uint8_t RowSz = 4;
 const uint8_t ColSz = 4;
 const uint8_t StripSz = RowSz * ColSz;
+const uint8_t PhysicalStripSz = 24;
 
 // Lookup table for strip number given row + col
 const uint8_t MatrixLookup[RowSz][ColSz] = {
