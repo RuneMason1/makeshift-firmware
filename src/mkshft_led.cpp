@@ -4,11 +4,19 @@
 #include <mkshft_core.hpp>
 namespace mkshft_ledMatrix {
 namespace {
+struct LedChannel {
+  uint8_t current = 0;
+  uint8_t target = 0;
+};
+
 byte drawingMemory[PhysicalStripSz * 3] = {};
 DMAMEM byte displayMemory[PhysicalStripSz * 12] = {};
 WS2812Serial strip(PhysicalStripSz, displayMemory, drawingMemory, LED_PIN,
                    WS2812_GRB);
 bool states[StripSz] = {};
+LedChannel red[StripSz] = {};
+LedChannel green[StripSz] = {};
+LedChannel blue[StripSz] = {};
 bool driverReady = false;
 bool outputEnabled = true;
 uint16_t physicalMask = 0;
@@ -17,6 +25,28 @@ constexpr uint8_t peakR = 216;
 constexpr uint8_t peakG = 58;
 constexpr uint8_t peakB = 4;
 constexpr uint16_t bootSequenceStepDelayMs = 120;
+constexpr uint8_t fadeStepUp = 18;
+constexpr uint8_t fadeStepDown = 12;
+
+uint8_t stepToward(uint8_t current, uint8_t target, uint8_t step) {
+  if (current == target) return current;
+  if (current < target) {
+    const uint16_t next = static_cast<uint16_t>(current) + step;
+    return next >= target ? target : static_cast<uint8_t>(next);
+  }
+
+  const uint8_t delta = current - target;
+  return current - (step < delta ? step : delta);
+}
+
+bool advanceChannel(LedChannel &channel, uint8_t riseStep, uint8_t fallStep) {
+  const uint8_t next =
+      stepToward(channel.current, channel.target,
+                 channel.current < channel.target ? riseStep : fallStep);
+  const bool changed = next != channel.current;
+  channel.current = next;
+  return changed;
+}
 
 void clearPhysicalStrip() {
   for (uint8_t physicalIndex = 0; physicalIndex < PhysicalStripSz;
@@ -43,7 +73,7 @@ void runBootSequence() {
   delay(bootSequenceStepDelayMs);
 }
 
-void renderStates() {
+void applyTargets() {
   physicalMask = 0;
   for (uint8_t logicalIndex = 0; logicalIndex < StripSz; logicalIndex++) {
     const uint8_t logicalRow = core::ButtonLookup[logicalIndex][0];
@@ -51,10 +81,39 @@ void renderStates() {
     const uint8_t physicalIndex = MatrixLookup[logicalRow][logicalCol];
     const bool active = states[logicalIndex];
     if (active) physicalMask |= static_cast<uint16_t>(1U << physicalIndex);
-    strip.setPixel(physicalIndex, active ? peakR : 0, active ? peakG : 0,
-                   active ? peakB : 0);
+    red[logicalIndex].target = active ? peakR : 0;
+    green[logicalIndex].target = active ? peakG : 0;
+    blue[logicalIndex].target = active ? peakB : 0;
   }
-  if (driverReady && outputEnabled) strip.show();
+}
+
+void renderFrame() {
+  for (uint8_t logicalIndex = 0; logicalIndex < StripSz; logicalIndex++) {
+    const uint8_t logicalRow = core::ButtonLookup[logicalIndex][0];
+    const uint8_t logicalCol = core::ButtonLookup[logicalIndex][1];
+    const uint8_t physicalIndex = MatrixLookup[logicalRow][logicalCol];
+    strip.setPixel(physicalIndex, gamma8[red[logicalIndex].current],
+                   gamma8[green[logicalIndex].current],
+                   gamma8[blue[logicalIndex].current]);
+  }
+}
+
+void snapAllChannelsToTarget() {
+  for (uint8_t logicalIndex = 0; logicalIndex < StripSz; logicalIndex++) {
+    red[logicalIndex].current = red[logicalIndex].target;
+    green[logicalIndex].current = green[logicalIndex].target;
+    blue[logicalIndex].current = blue[logicalIndex].target;
+  }
+}
+
+bool advanceFadeFrame() {
+  bool changed = false;
+  for (uint8_t logicalIndex = 0; logicalIndex < StripSz; logicalIndex++) {
+    changed |= advanceChannel(red[logicalIndex], fadeStepUp, fadeStepDown);
+    changed |= advanceChannel(green[logicalIndex], fadeStepUp, fadeStepDown);
+    changed |= advanceChannel(blue[logicalIndex], fadeStepUp, fadeStepDown);
+  }
+  return changed;
 }
 }
 
@@ -71,6 +130,8 @@ void init() {
     strip.show();
     delay(1);
     runBootSequence();
+    renderFrame();
+    strip.show();
   }
 }
 
@@ -82,7 +143,7 @@ int8_t setButtonState(uint8_t buttonIndex, bool pressed) {
   const uint8_t row = core::ButtonLookup[buttonIndex][0];
   const uint8_t col = core::ButtonLookup[buttonIndex][1];
   const uint8_t changedPhysicalIndex = MatrixLookup[row][col];
-  renderStates();
+  applyTargets();
   return changedPhysicalIndex;
 }
 
@@ -104,13 +165,20 @@ void setEnabled(bool enabled) {
   outputEnabled = enabled;
   physicalMask = 0;
   for (bool &state : states) state = false;
+  applyTargets();
+  snapAllChannelsToTarget();
   clearPhysicalStrip();
   if (driverReady) strip.show();
 }
 
 bool isEnabled() { return outputEnabled; }
 
-void update() {}
+void update() {
+  if (!driverReady || !outputEnabled) return;
+  if (!advanceFadeFrame()) return;
+  renderFrame();
+  strip.show();
+}
 
 void post() {
   if (!driverReady || !outputEnabled) return;

@@ -258,7 +258,7 @@ void loop()
 
   if (statePrev.button[3] != stateCurr.button[3] &&
       stateCurr.button[3] == core::ON) {
-    mkshft_ctrl::sendString("GOXLR_NEXT");
+    mkshft_ctrl::sendString("GOXLR_MUTE_TOGGLE");
   }
   if (stateCurr.dialRelative[3] != 0) {
     mkshft_ctrl::sendString(std::string("GOXLR_ADJUST:") +
@@ -324,6 +324,7 @@ void loop()
   stateChanged = false;
   mkshft_ui::renderUI();
   mkshft_display::update();
+  mkshft_ledMatrix::update();
   mkshft_ctrl::update();
 }
 
