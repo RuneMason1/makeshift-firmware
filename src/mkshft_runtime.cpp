@@ -33,11 +33,19 @@ bool beginManifest(uint8_t version, uint8_t count) {
 
 bool addComponent(const Component &component) {
   if (!transactionActive || pendingCount >= expectedCount ||
-      !validType(component.type) || !validZone(component.zone))
+      component.id == 0 || !validType(component.type) ||
+      !validZone(component.zone) ||
+      (component.flags & ~(ENABLED | PRELOAD)) != 0 ||
+      ((component.flags & PRELOAD) != 0 &&
+       (component.flags & ENABLED) == 0))
     return false;
 
   for (uint8_t index = 0; index < pendingCount; ++index) {
     if (pendingComponents[index].id == component.id) return false;
+    if ((pendingComponents[index].flags & ENABLED) != 0 &&
+        (component.flags & ENABLED) != 0 &&
+        pendingComponents[index].zone == component.zone)
+      return false;
   }
   pendingComponents[pendingCount++] = component;
   return true;
