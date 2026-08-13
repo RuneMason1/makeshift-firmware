@@ -6,6 +6,14 @@ Asset assets[MAX_ASSETS] = {};
 Asset pending = {};
 uint16_t received = 0;
 bool transferActive = false;
+uint32_t lastTransferActivityMs = 0;
+constexpr uint32_t TRANSFER_TIMEOUT_MS = 5000;
+
+bool transferExpired() {
+  return transferActive &&
+         static_cast<uint32_t>(millis() - lastTransferActivityMs) >=
+             TRANSFER_TIMEOUT_MS;
+}
 
 int8_t findSlot(uint8_t id) {
   for (uint8_t index = 0; index < MAX_ASSETS; ++index) {
@@ -30,19 +38,23 @@ bool beginAsset(uint8_t id, Format format, uint8_t width, uint8_t height,
   pending = {id, format, width, height, length, {}, false};
   received = 0;
   transferActive = true;
+  lastTransferActivityMs = millis();
   return true;
 }
 
 bool writeChunk(uint16_t offset, const uint8_t *data, size_t length) {
+  if (transferExpired()) cancelTransfer();
   if (!transferActive || data == nullptr || offset != received || length == 0 ||
       offset + length > pending.length)
     return false;
   memcpy(pending.data + offset, data, length);
   received += length;
+  lastTransferActivityMs = millis();
   return true;
 }
 
 bool commitAsset() {
+  if (transferExpired()) cancelTransfer();
   if (!transferActive || received != pending.length) return false;
   const int8_t slot = findSlot(pending.id);
   if (slot < 0) return false;
@@ -56,6 +68,11 @@ void cancelTransfer() {
   pending = {};
   received = 0;
   transferActive = false;
+  lastTransferActivityMs = 0;
+}
+
+void updateTransferTimeout() {
+  if (transferExpired()) cancelTransfer();
 }
 
 const Asset *find(uint8_t id) {

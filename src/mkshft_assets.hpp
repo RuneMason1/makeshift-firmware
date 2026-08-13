@@ -27,6 +27,7 @@ bool beginAsset(uint8_t id, Format format, uint8_t width, uint8_t height,
 bool writeChunk(uint16_t offset, const uint8_t *data, size_t length);
 bool commitAsset();
 void cancelTransfer();
+void updateTransferTimeout();
 const Asset *find(uint8_t id);
 
 } // namespace mkshft_assets

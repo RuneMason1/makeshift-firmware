@@ -19,6 +19,7 @@ static char *serialNumber;
 #include <mkshft_ctrl.hpp>
 #include <mkshft_display.hpp>
 #include <mkshft_led.hpp>
+#include <mkshft_media_cache.hpp>
 #include <mkshft_runtime.hpp>
 #include <mkshft_ui.hpp>
 
@@ -322,6 +323,8 @@ void loop()
   mkshft_ui::renderUI();
   mkshft_display::update();
   mkshft_ledMatrix::update();
+  mkshft_assets::updateTransferTimeout();
+  mkshft_media_cache::updateTransferTimeout();
   mkshft_ctrl::update();
 }
 
@@ -396,6 +399,9 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     break;
   case MessageType::DISCONNECT:
     connected = false;
+    mkshft_assets::cancelTransfer();
+    mkshft_media_cache::cancelWrite();
+    mkshft_runtime::cancelManifest();
     mkshft_ui::setUsbConnected(false);
     break;
   case MessageType::GAME_CARD_BEGIN: {

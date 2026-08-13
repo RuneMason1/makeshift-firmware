@@ -12,6 +12,14 @@ uint32_t pixelsReceived = 0;
 uint8_t transferItemIndex = 0;
 uint8_t transferSlot = 0;
 bool transferActive = false;
+uint32_t lastTransferActivityMs = 0;
+constexpr uint32_t TRANSFER_TIMEOUT_MS = 5000;
+
+bool transferExpired() {
+  return transferActive &&
+         static_cast<uint32_t>(millis() - lastTransferActivityMs) >=
+             TRANSFER_TIMEOUT_MS;
+}
 
 bool beginWrite(uint8_t slot, uint8_t itemIndex, uint16_t width,
                 uint16_t height) {
@@ -32,10 +40,12 @@ bool beginWrite(uint8_t slot, uint8_t itemIndex, uint16_t width,
   transferSlot = slot;
   slots[slot].valid = false;
   transferActive = !textOnly;
+  lastTransferActivityMs = transferActive ? millis() : 0;
   return true;
 }
 
 bool writeChunk(uint32_t pixelOffset, const uint8_t *data, size_t dataLength) {
+  if (transferExpired()) cancelWrite();
   if (!transferActive || data == nullptr || dataLength == 0 ||
       (dataLength % 2) != 0 || pixelOffset != pixelsReceived) {
     return false;
@@ -53,22 +63,37 @@ bool writeChunk(uint32_t pixelOffset, const uint8_t *data, size_t dataLength) {
         (static_cast<uint16_t>(data[index * 2]) << 8) | data[index * 2 + 1];
   }
   pixelsReceived += pixelCount;
+  lastTransferActivityMs = millis();
   return true;
 }
 
 bool commitWrite() {
+  if (transferExpired()) cancelWrite();
   const uint32_t expectedPixels = transferWidth * transferHeight;
   if (!transferActive || pixelsReceived != expectedPixels) {
     return false;
   }
 
   transferActive = false;
+  lastTransferActivityMs = 0;
   slots[transferSlot] = {transferItemIndex, transferWidth, transferHeight, true};
   return true;
 }
 
-void invalidateAll() {
+void cancelWrite() {
   transferActive = false;
+  transferWidth = 0;
+  transferHeight = 0;
+  pixelsReceived = 0;
+  lastTransferActivityMs = 0;
+}
+
+void updateTransferTimeout() {
+  if (transferExpired()) cancelWrite();
+}
+
+void invalidateAll() {
+  cancelWrite();
   for (auto &slot : slots) slot.valid = false;
 }
 

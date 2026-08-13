@@ -18,6 +18,8 @@ bool beginWrite(uint8_t slot, uint8_t itemIndex, uint16_t width,
                 uint16_t height);
 bool writeChunk(uint32_t pixelOffset, const uint8_t *data, size_t dataLength);
 bool commitWrite();
+void cancelWrite();
+void updateTransferTimeout();
 void invalidateAll();
 bool isWriteActive();
 int8_t findSlot(uint8_t itemIndex);
