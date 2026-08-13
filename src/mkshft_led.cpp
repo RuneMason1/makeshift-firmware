@@ -200,45 +200,8 @@ void update() {
 }
 
 void post() {
-  if (!driverReady || !outputEnabled) return;
-
-  // TODO: finish testing
-  Serial.println("Testing color deltas");
-  Color test1 = {0, 0, 0};
-  Color test2 = {255, 255, 255};
-  Serial.print("t1: ");
-  printColor(test1);
-  Serial.print(" | t2: ");
-  printColor(test2);
-  ColorDelta delta12 = test1 - test2;
-  ColorDelta delta21 = test2 - test1;
-
-  Serial.print(" | d12: ");
-  printColor(delta12);
-  Serial.print(" | d21: ");
-
-  printColor(delta21);
-  Serial.println();
-
-  // color indicators
-  for (uint8_t i = 0; i != 125; i++) {
-    const Color color = {gamma8[i], 0, gamma8[i]};
-    for (int n = 0; n < PhysicalStripSz; n++) {
-      strip.setPixelColor(n, color.r, color.g, color.b);
-    }
-    strip.show();
-    delay(1);
-  }
-  for (uint8_t i = 125; i != 255; i--) {
-    const Color color = {gamma8[i], 0, gamma8[i]};
-    for (int n = 0; n < PhysicalStripSz; n++) {
-      strip.setPixelColor(n, color.r, color.g, color.b);
-    }
-    strip.show();
-    delay(10);
-  }
-  Serial.println("end of POST");
-  delay(1000);
+  // The production LED path uses fixed arrays. Heap-backed Pixel sequences
+  // remain available only in explicitly enabled legacy builds.
 }
 
 void colorStripPixel(uint8_t row, uint8_t col, uint8_t r, uint8_t g,

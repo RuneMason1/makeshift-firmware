@@ -3,7 +3,6 @@
 
 // TODO: sync colors between tgx and this module
 #include <Arduino.h>
-#include <list>
 #include <math.h>
 
 struct Color {
@@ -11,6 +10,9 @@ struct Color {
   uint8_t g;
   uint8_t b;
 };
+
+#ifdef MKSHFT_ENABLE_LEGACY_PIXEL
+#include <list>
 
 struct ColorDelta {
   int16_t r;
@@ -47,6 +49,7 @@ void printColor(Color c);
 void printColor(ColorDelta c);
 void printEvent(ColorEvent e);
 void printSequence(ColorSequence s);
+#endif
 
 // Pixel color adjustment map array
 const uint8_t gamma8[] = {
