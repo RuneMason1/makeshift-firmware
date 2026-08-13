@@ -110,6 +110,8 @@ void moveLocalGameSelection(int delta);
 bool updateGameCarouselTimeout();
 void showGoXlrStatus(bool adjusting, bool muted, const char *name,
                      size_t nameLength, uint8_t percent);
+bool showStatusBadge(uint8_t zone, bool adjusting, bool inactive,
+                     const char *name, size_t nameLength, uint8_t percent);
 void updateOverlayTimeout();
 bool showOverlayGlyph(uint8_t glyphId);
 bool showActionGlyph(uint8_t glyphId);

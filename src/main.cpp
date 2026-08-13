@@ -62,6 +62,8 @@ uint8_t row, col;
 uint32_t usbUnavailableSince = 0;
 bool usbUnavailableTimerActive = false;
 bool usbIdleSleeping = false;
+uint8_t collectionDialIndex = 0;
+uint8_t collectionButtonIndex = 0;
 
 // Layout *baseLayout;
 // LoadingBar *testBar;
@@ -243,13 +245,16 @@ void loop()
 
   if (mkshft_runtime::isEnabled(mkshft_runtime::ComponentType::CAROUSEL) &&
       mkshft_ui::isLocalCollectionActive()) {
-    if (stateCurr.dialRelative[0] != 0) {
-      mkshft_ui::moveLocalCollectionSelection(stateCurr.dialRelative[0]);
+    if (stateCurr.dialRelative[collectionDialIndex] != 0) {
+      mkshft_ui::moveLocalCollectionSelection(
+          stateCurr.dialRelative[collectionDialIndex]);
       mkshft_ctrl::sendString(std::string("GAME_SELECT:") +
                               mkshft_ui::selectedCollectionItemId());
     }
-    if (statePrev.button[0] != stateCurr.button[0] &&
-        stateCurr.button[0] == core::ON && mkshft_ui::isGameCardVisible()) {
+    if (statePrev.button[collectionButtonIndex] !=
+            stateCurr.button[collectionButtonIndex] &&
+        stateCurr.button[collectionButtonIndex] == core::ON &&
+        mkshft_ui::isGameCardVisible()) {
       mkshft_ctrl::sendString(std::string("GAME_LAUNCH:") +
                               mkshft_ui::selectedCollectionItemId());
       mkshft_ui::showHomeScreen();
@@ -309,8 +314,8 @@ void loop()
   {
     core::state_t stateToSend = stateCurr;
     if (mkshft_ui::isLocalCollectionActive()) {
-      stateToSend.dialRelative[0] = 0;
-      stateToSend.button[0] = false;
+      stateToSend.dialRelative[collectionDialIndex] = 0;
+      stateToSend.button[collectionButtonIndex] = false;
     }
     mkshft_ctrl::sendState(stateToSend);
     // core::printStateToSerial(core::getState());
@@ -572,6 +577,29 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
         !mkshft_ui::applyVisualPreferences(
             buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7],
             buffer[8], buffer[9], buffer[10], buffer[11])) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    sendByte(MessageType::ACK);
+    break;
+  case MessageType::COLLECTION_INPUT_BINDING:
+    if (bufSz != 3 || buffer[1] >= core::szDialArray ||
+        buffer[2] >= core::szButtonArray) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    collectionDialIndex = buffer[1];
+    collectionButtonIndex = buffer[2];
+    sendByte(MessageType::ACK);
+    break;
+  case MessageType::STATUS_BADGE:
+    // zone:u8 (1 lower-left, 2 lower-right), flags:u8, percent:u8, label:utf8
+    if (bufSz < 5 ||
+        !mkshft_ui::showStatusBadge(
+            buffer[1], (buffer[2] & 0x01) != 0,
+            (buffer[2] & 0x02) != 0,
+            reinterpret_cast<const char *>(buffer + 4), bufSz - 4,
+            min<uint8_t>(buffer[3], 100))) {
       sendByte(MessageType::ERROR);
       break;
     }

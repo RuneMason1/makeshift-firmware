@@ -44,6 +44,8 @@ enum MessageType {
   ASSET_CHUNK,
   ASSET_COMMIT,
   DEVICE_VISUALS,
+  COLLECTION_INPUT_BINDING,
+  STATUS_BADGE,
 };
 
 extern bool connected;

@@ -20,11 +20,15 @@ enum class ComponentType : uint8_t {
 };
 
 enum class Zone : uint8_t {
-  FULL_SCREEN = 0,
-  LEFT = 1,
+  SPECIAL = 0,
+  LOWER_LEFT = 1,
   LOWER_RIGHT = 2,
-  TOP_BAR = 3,
-  OVERLAY = 4,
+  UPPER = 3,
+  CENTER = 4,
+  FULL_SCREEN = SPECIAL,
+  LEFT = LOWER_LEFT,
+  TOP_BAR = UPPER,
+  OVERLAY = CENTER,
 };
 
 enum ComponentFlags : uint8_t {

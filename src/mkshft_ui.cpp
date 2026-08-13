@@ -33,6 +33,10 @@ char goXlrChannelLabel[33] = "Chromecast";
 uint8_t goXlrChannelPercent = 0;
 bool goXlrChannelMuted = false;
 bool goXlrPercentKnown = false;
+char lowerLeftStatusLabel[33] = {};
+uint8_t lowerLeftStatusPercent = 0;
+bool lowerLeftStatusInactive = false;
+bool lowerLeftStatusKnown = false;
 constexpr size_t NOW_PLAYING_MAX_LENGTH = 160;
 char nowPlaying[NOW_PLAYING_MAX_LENGTH + 1] = {};
 bool nowPlayingActive = false;
@@ -117,10 +121,10 @@ void drawNowPlayingTicker() {
 
 void drawPersistentGoXlrLabel() {
   if (!usbConnected || !goXlrPercentKnown) return;
-  constexpr int right = 311;
+  constexpr int right = 304;
   constexpr int labelBaseline = 230;
-  constexpr int mutedIndicatorLeft = 196;
-  constexpr int mutedIndicatorRight = 202;
+  constexpr int mutedIndicatorLeft = 310;
+  constexpr int mutedIndicatorRight = 316;
   constexpr int mutedIndicatorTop = 220;
   constexpr int mutedIndicatorBottom = 226;
   char percent[8] = {};
@@ -129,9 +133,11 @@ void drawPersistentGoXlrLabel() {
   const int percentWidth = textWidth(percent);
   const RGB32 mutedColor(255, 64, 64);
   const RGB32 normalColor(216, 58, 4);
-  // Always clear the full badge width so a shorter channel name cannot leave
-  // pixels behind from a previous label such as "Chromecast".
-  defaultCanvas->fillRect(iBox2(190, 319, 190, 239), RGB32(8, 13, 18));
+  // Restore the zone from the selected wallpaper so shorter labels cannot
+  // leave pixels behind without placing an opaque panel over the logo.
+  const Image<RGB565> background =
+      selectedHomeSplash().getCrop(iBox2(190, 319, 190, 239));
+  defaultCanvas->blit(background, iVec2(190, 190));
   defaultCanvas->drawText(percent, iVec2(right - percentWidth, 207),
                           *baseFont, RGB32(245, 240, 220));
   if (goXlrChannelMuted) {
@@ -144,6 +150,34 @@ void drawPersistentGoXlrLabel() {
                           iVec2(right - labelWidth, labelBaseline),
                           *baseFont,
                           goXlrChannelMuted ? mutedColor : normalColor);
+}
+
+void drawLowerLeftStatusBadge() {
+  if (!usbConnected || !lowerLeftStatusKnown) return;
+  constexpr int left = 15;
+  constexpr int labelBaseline = 230;
+  constexpr int inactiveIndicatorLeft = 3;
+  constexpr int inactiveIndicatorRight = 9;
+  constexpr int inactiveIndicatorTop = 220;
+  constexpr int inactiveIndicatorBottom = 226;
+  char percent[8] = {};
+  snprintf(percent, sizeof(percent), "%u%%", lowerLeftStatusPercent);
+  const RGB32 inactiveColor(255, 64, 64);
+  const RGB32 normalColor(216, 58, 4);
+  const Image<RGB565> background =
+      selectedHomeSplash().getCrop(iBox2(0, 129, 190, 239));
+  defaultCanvas->blit(background, iVec2(0, 190));
+  defaultCanvas->drawText(percent, iVec2(left, 207), *baseFont,
+                          RGB32(245, 240, 220));
+  if (lowerLeftStatusInactive) {
+    defaultCanvas->fillRect(
+        iBox2(inactiveIndicatorLeft, inactiveIndicatorRight,
+              inactiveIndicatorTop, inactiveIndicatorBottom),
+        inactiveColor);
+  }
+  defaultCanvas->drawText(lowerLeftStatusLabel, iVec2(left, labelBaseline),
+                          *baseFont,
+                          lowerLeftStatusInactive ? inactiveColor : normalColor);
 }
 
 void drawGameTitle(const char *title) {
@@ -390,8 +424,11 @@ void renderUI() {
 
 void splashScreen() {
   defaultCanvas->blit(selectedHomeSplash(), iVec2(0, 0));
-  setUsbConnected(usbConnected);
+  defaultCanvas->fillRect(
+      iBox2(0, 319, 0, 9),
+      usbConnected ? usbConnectedColor : usbDisconnectedColor);
   drawNowPlayingTicker();
+  drawLowerLeftStatusBadge();
   drawPersistentGoXlrLabel();
 
   // currentLayout->addWidget(WTriangle("testTriangle", iVec2(0,0), iVec2(50,0), iVec2(0,50)));
@@ -458,14 +495,24 @@ void setUsbConnected(bool connected) {
     goXlrChannelLabel[0] = '\0';
     goXlrChannelPercent = 0;
     goXlrChannelMuted = false;
+    lowerLeftStatusKnown = false;
+    lowerLeftStatusLabel[0] = '\0';
+    lowerLeftStatusPercent = 0;
+    lowerLeftStatusInactive = false;
     nowPlayingActive = false;
     nowPlaying[0] = '\0';
     nowPlayingOffset = 0;
     nowPlayingLastFrameMs = 0;
     nowPlayingHoldUntilMs = 0;
     nowPlayingHoldingAtEnd = false;
-    if (!gameCardVisible && !actionGlyphVisible)
-      defaultCanvas->fillRect(iBox2(196, 319, 190, 239), RGB32(8, 13, 18));
+    gameCardVisible = false;
+    gameCardLastInteractionMs = 0;
+    actionGlyphVisible = false;
+    actionGlyphShownMs = 0;
+    goXlrVisible = false;
+    goXlrShownMs = 0;
+    splashScreen();
+    return;
   }
   if (gameCardVisible || actionGlyphVisible || goXlrVisible) {
     return;
@@ -540,7 +587,6 @@ bool commitCollectionCard() {
 }
 
 void showHomeScreen() {
-  const bool wasUsbConnected = usbConnected;
   gameCardVisible = false;
   gameCardLastInteractionMs = 0;
   actionGlyphVisible = false;
@@ -548,7 +594,6 @@ void showHomeScreen() {
   goXlrVisible = false;
   goXlrShownMs = 0;
   splashScreen();
-  setUsbConnected(wasUsbConnected);
 }
 
 bool beginGameList(uint8_t expectedCount) {
@@ -646,16 +691,32 @@ void updateOverlayTimeout() {
 
 void showGoXlrStatus(bool adjusting, bool muted, const char *name,
                      size_t nameLength, uint8_t percent) {
+  showStatusBadge(2, adjusting, muted, name, nameLength, percent);
+}
+
+bool showStatusBadge(uint8_t zone, bool, bool inactive, const char *name,
+                     size_t nameLength, uint8_t percent) {
+  if ((zone != 1 && zone != 2) || name == nullptr || nameLength == 0)
+    return false;
   char label[33] = {};
   const size_t copyLength = min(nameLength, sizeof(label) - 1);
   memcpy(label, name, copyLength);
+  if (zone == 1) {
+    memcpy(lowerLeftStatusLabel, label, copyLength + 1);
+    lowerLeftStatusPercent = min<uint8_t>(percent, 100);
+    lowerLeftStatusInactive = inactive;
+    lowerLeftStatusKnown = true;
+    drawLowerLeftStatusBadge();
+    return true;
+  }
   memcpy(goXlrChannelLabel, label, copyLength + 1);
   goXlrChannelPercent = min<uint8_t>(percent, 100);
-  goXlrChannelMuted = muted;
+  goXlrChannelMuted = inactive;
   goXlrPercentKnown = true;
   goXlrVisible = false;
   goXlrShownMs = 0;
   drawPersistentGoXlrLabel();
+  return true;
 }
 
 bool showOverlayGlyph(uint8_t glyphId) {
@@ -673,9 +734,9 @@ bool showOverlayGlyph(uint8_t glyphId) {
   constexpr int bottom = 193;
   constexpr int radius = 20;
   defaultCanvas->fillRoundRect(iBox2(left + 4, right + 4, top + 5, bottom + 5),
-                               radius, shadow, 1.0f);
+                               radius, shadow, 0.45f);
   defaultCanvas->fillRoundRect(iBox2(left, right, top, bottom), radius, panel,
-                               1.0f);
+                               0.72f);
 
   if (drawCachedGlyph(glyphId, 160, 120, foreground, 2)) {
     return true;
@@ -692,18 +753,24 @@ bool showOverlayGlyph(uint8_t glyphId) {
                                 iVec2(203, 120), foreground, foreground, 1.0f);
     defaultCanvas->fillRect(iBox2(206, 219, 92, 148), foreground);
   } else if (glyphId == 4) {
-    defaultCanvas->fillRect(iBox2(108, 128, 104, 136), foreground);
-    defaultCanvas->fillTriangle(iVec2(128, 104), iVec2(128, 136),
-                                iVec2(154, 120), foreground, foreground, 1.0f);
-    defaultCanvas->drawCircle(iVec2(172, 120), 16, foreground);
-    defaultCanvas->drawCircle(iVec2(172, 120), 28, foreground);
-    defaultCanvas->drawLine(iVec2(104, 154), iVec2(216, 86), foreground);
+    defaultCanvas->fillRect(iBox2(108, 127, 105, 135), foreground);
+    defaultCanvas->fillTriangle(iVec2(127, 105), iVec2(127, 135),
+                                iVec2(153, 120), foreground, foreground, 1.0f);
+    for (int offset = -2; offset <= 2; ++offset) {
+      defaultCanvas->drawLine(iVec2(174 + offset, 106),
+                              iVec2(202 + offset, 134), foreground);
+      defaultCanvas->drawLine(iVec2(202 + offset, 106),
+                              iVec2(174 + offset, 134), foreground);
+    }
   } else if (glyphId == 5) {
-    defaultCanvas->fillRect(iBox2(108, 128, 104, 136), foreground);
-    defaultCanvas->fillTriangle(iVec2(128, 104), iVec2(128, 136),
-                                iVec2(154, 120), foreground, foreground, 1.0f);
-    defaultCanvas->drawCircle(iVec2(172, 120), 16, foreground);
-    defaultCanvas->drawCircle(iVec2(172, 120), 28, foreground);
+    defaultCanvas->fillRect(iBox2(108, 127, 105, 135), foreground);
+    defaultCanvas->fillTriangle(iVec2(127, 105), iVec2(127, 135),
+                                iVec2(153, 120), foreground, foreground, 1.0f);
+    Image<RGB565> waves(*defaultCanvas, iBox2(154, 211, 88, 152));
+    for (int radius = 15; radius <= 17; ++radius)
+      waves.drawCircle(iVec2(0, 32), radius, foreground);
+    for (int radius = 27; radius <= 29; ++radius)
+      waves.drawCircle(iVec2(0, 32), radius, foreground);
   } else {
     defaultCanvas->fillTriangle(iVec2(99, 92), iVec2(99, 148),
                                 iVec2(145, 120), foreground, foreground, 1.0f);

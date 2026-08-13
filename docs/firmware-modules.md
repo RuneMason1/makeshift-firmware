@@ -136,6 +136,20 @@ Recommended public asset names for cue-driven overlays:
 - `media.mute`
 - `media.unmute`
 
+### 5. Screen Zones
+
+Features request a semantic screen zone; they do not own display coordinates:
+
+- `SPECIAL` (`0`) is an exclusive full-screen experience such as a collection carousel.
+- `LOWER_LEFT` (`1`) is a persistent status badge, currently used by bedroom lighting.
+- `LOWER_RIGHT` (`2`) is a persistent status badge, currently used by GoXLR.
+- `UPPER` (`3`) is the scrolling ticker/banner region.
+- `CENTER` (`4`) is the temporary glyph/confirmation overlay.
+
+Legacy names remain aliases at the same numeric values. New modules should use
+the canonical names above and render through the zone owner rather than adding
+feature-specific coordinates.
+
 ## How To Add A New Firmware Module
 
 Before adding code, ask:
