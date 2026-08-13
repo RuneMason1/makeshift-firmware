@@ -27,16 +27,15 @@ bool localGameCarouselActive = false;
 uint32_t gameCardLastInteractionMs = 0;
 bool actionGlyphVisible = false;
 uint32_t actionGlyphShownMs = 0;
-bool goXlrVisible = false;
-uint32_t goXlrShownMs = 0;
-char goXlrChannelLabel[33] = "Chromecast";
-uint8_t goXlrChannelPercent = 0;
-bool goXlrChannelMuted = false;
-bool goXlrPercentKnown = false;
-char lowerLeftStatusLabel[33] = {};
-uint8_t lowerLeftStatusPercent = 0;
-bool lowerLeftStatusInactive = false;
-bool lowerLeftStatusKnown = false;
+struct StatusBadgeState {
+  char label[33] = {};
+  uint8_t percent = 0;
+  bool inactive = false;
+  bool known = false;
+};
+
+StatusBadgeState lowerLeftStatus;
+StatusBadgeState lowerRightStatus;
 constexpr size_t NOW_PLAYING_MAX_LENGTH = 160;
 char nowPlaying[NOW_PLAYING_MAX_LENGTH + 1] = {};
 bool nowPlayingActive = false;
@@ -47,7 +46,6 @@ bool nowPlayingHoldingAtEnd = false;
 
 constexpr uint32_t GAME_CARD_TIMEOUT_MS = 5000;
 constexpr uint32_t ACTION_GLYPH_TIMEOUT_MS = 1500;
-constexpr uint32_t GOXLR_TIMEOUT_MS = 3000;
 constexpr uint16_t BOOT_EOS_HOLD_MS = 900;
 constexpr uint16_t BOOT_MAKESHIFT_HOLD_MS = 1200;
 uint8_t homeSplashImageId = SPLASH_HOME_DEFAULT;
@@ -140,7 +138,7 @@ void drawNowPlayingTicker() {
 }
 
 void drawPersistentGoXlrLabel() {
-  if (!usbConnected || !goXlrPercentKnown) return;
+  if (!usbConnected || !lowerRightStatus.known) return;
   constexpr int right = 304;
   constexpr int labelBaseline = 230;
   constexpr int mutedIndicatorLeft = 310;
@@ -148,27 +146,27 @@ void drawPersistentGoXlrLabel() {
   constexpr int mutedIndicatorTop = 220;
   constexpr int mutedIndicatorBottom = 226;
   char percent[8] = {};
-  snprintf(percent, sizeof(percent), "%u%%", goXlrChannelPercent);
-  const int labelWidth = textWidth(goXlrChannelLabel);
+  snprintf(percent, sizeof(percent), "%u%%", lowerRightStatus.percent);
+  const int labelWidth = textWidth(lowerRightStatus.label);
   const int percentWidth = textWidth(percent);
   const RGB32 mutedColor(255, 64, 64);
   const RGB32 normalColor(216, 58, 4);
   defaultCanvas->drawText(percent, iVec2(right - percentWidth, 207),
                           *baseFont, RGB32(245, 240, 220));
-  if (goXlrChannelMuted) {
+  if (lowerRightStatus.inactive) {
     defaultCanvas->fillRect(
         iBox2(mutedIndicatorLeft, mutedIndicatorRight, mutedIndicatorTop,
               mutedIndicatorBottom),
         mutedColor);
   }
-  defaultCanvas->drawText(goXlrChannelLabel,
+  defaultCanvas->drawText(lowerRightStatus.label,
                           iVec2(right - labelWidth, labelBaseline),
                           *baseFont,
-                          goXlrChannelMuted ? mutedColor : normalColor);
+                          lowerRightStatus.inactive ? mutedColor : normalColor);
 }
 
 void drawLowerLeftStatusBadge() {
-  if (!usbConnected || !lowerLeftStatusKnown) return;
+  if (!usbConnected || !lowerLeftStatus.known) return;
   constexpr int left = 15;
   constexpr int labelBaseline = 230;
   constexpr int inactiveIndicatorLeft = 3;
@@ -176,25 +174,24 @@ void drawLowerLeftStatusBadge() {
   constexpr int inactiveIndicatorTop = 220;
   constexpr int inactiveIndicatorBottom = 226;
   char percent[8] = {};
-  snprintf(percent, sizeof(percent), "%u%%", lowerLeftStatusPercent);
+  snprintf(percent, sizeof(percent), "%u%%", lowerLeftStatus.percent);
   const RGB32 inactiveColor(255, 64, 64);
   const RGB32 normalColor(216, 58, 4);
   defaultCanvas->drawText(percent, iVec2(left, 207), *baseFont,
                           RGB32(245, 240, 220));
-  if (lowerLeftStatusInactive) {
+  if (lowerLeftStatus.inactive) {
     defaultCanvas->fillRect(
         iBox2(inactiveIndicatorLeft, inactiveIndicatorRight,
               inactiveIndicatorTop, inactiveIndicatorBottom),
         inactiveColor);
   }
-  defaultCanvas->drawText(lowerLeftStatusLabel, iVec2(left, labelBaseline),
+  defaultCanvas->drawText(lowerLeftStatus.label, iVec2(left, labelBaseline),
                           *baseFont,
-                          lowerLeftStatusInactive ? inactiveColor : normalColor);
+                          lowerLeftStatus.inactive ? inactiveColor : normalColor);
 }
 
 void composeHome() {
-  if (dirtyHomeZones == DIRTY_NONE || gameCardVisible || actionGlyphVisible ||
-      goXlrVisible)
+  if (dirtyHomeZones == DIRTY_NONE || gameCardVisible || actionGlyphVisible)
     return;
 
   uint8_t zones = dirtyHomeZones;
@@ -530,14 +527,8 @@ void playBootSequence() {
 void setUsbConnected(bool connected) {
   usbConnected = connected;
   if (!connected) {
-    goXlrPercentKnown = false;
-    goXlrChannelLabel[0] = '\0';
-    goXlrChannelPercent = 0;
-    goXlrChannelMuted = false;
-    lowerLeftStatusKnown = false;
-    lowerLeftStatusLabel[0] = '\0';
-    lowerLeftStatusPercent = 0;
-    lowerLeftStatusInactive = false;
+    lowerLeftStatus = {};
+    lowerRightStatus = {};
     nowPlayingActive = false;
     nowPlaying[0] = '\0';
     nowPlayingOffset = 0;
@@ -548,12 +539,10 @@ void setUsbConnected(bool connected) {
     gameCardLastInteractionMs = 0;
     actionGlyphVisible = false;
     actionGlyphShownMs = 0;
-    goXlrVisible = false;
-    goXlrShownMs = 0;
     splashScreen();
     return;
   }
-  if (gameCardVisible || actionGlyphVisible || goXlrVisible) {
+  if (gameCardVisible || actionGlyphVisible) {
     return;
   }
   invalidateHome(DIRTY_CONNECTION);
@@ -572,7 +561,7 @@ bool applyVisualPreferences(uint8_t splashImageId, uint8_t ledR, uint8_t ledG,
   usbDisconnectedColor = RGB32(disconnectedR, disconnectedG, disconnectedB);
   mkshft_ledMatrix::setBaseColor(ledR, ledG, ledB);
 
-  if (!gameCardVisible && !actionGlyphVisible && !goXlrVisible) {
+  if (!gameCardVisible && !actionGlyphVisible) {
     splashScreen();
   }
   return true;
@@ -629,8 +618,6 @@ void showHomeScreen() {
   gameCardLastInteractionMs = 0;
   actionGlyphVisible = false;
   actionGlyphShownMs = 0;
-  goXlrVisible = false;
-  goXlrShownMs = 0;
   splashScreen();
 }
 
@@ -721,10 +708,6 @@ bool updateLocalCollectionTimeout() {
 }
 
 void updateOverlayTimeout() {
-  if (goXlrVisible && goXlrShownMs != 0 &&
-      static_cast<uint32_t>(millis() - goXlrShownMs) >= GOXLR_TIMEOUT_MS) {
-    showHomeScreen();
-  }
 }
 
 void showGoXlrStatus(bool adjusting, bool muted, const char *name,
@@ -739,21 +722,12 @@ bool showStatusBadge(uint8_t zone, bool, bool inactive, const char *name,
   char label[33] = {};
   const size_t copyLength = min(nameLength, sizeof(label) - 1);
   memcpy(label, name, copyLength);
-  if (zone == 1) {
-    memcpy(lowerLeftStatusLabel, label, copyLength + 1);
-    lowerLeftStatusPercent = min<uint8_t>(percent, 100);
-    lowerLeftStatusInactive = inactive;
-    lowerLeftStatusKnown = true;
-    invalidateHome(DIRTY_LOWER_LEFT);
-    return true;
-  }
-  memcpy(goXlrChannelLabel, label, copyLength + 1);
-  goXlrChannelPercent = min<uint8_t>(percent, 100);
-  goXlrChannelMuted = inactive;
-  goXlrPercentKnown = true;
-  goXlrVisible = false;
-  goXlrShownMs = 0;
-  invalidateHome(DIRTY_LOWER_RIGHT);
+  StatusBadgeState &status = zone == 1 ? lowerLeftStatus : lowerRightStatus;
+  memcpy(status.label, label, copyLength + 1);
+  status.percent = min<uint8_t>(percent, 100);
+  status.inactive = inactive;
+  status.known = true;
+  invalidateHome(zone == 1 ? DIRTY_LOWER_LEFT : DIRTY_LOWER_RIGHT);
   return true;
 }
 
