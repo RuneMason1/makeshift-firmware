@@ -39,8 +39,6 @@ static char *serialNumber;
 
 const long readInputPeriodUs =
     1000L; // microseconds between dial + button scanning cycle
-const long ledRenderPeriodUs =
-    26667L; // microseconds between LED animation frames
 constexpr uint32_t usbIdleSleepDelayMs = 5UL * 60UL * 1000UL;
  
 

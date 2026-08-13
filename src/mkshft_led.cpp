@@ -20,6 +20,7 @@ LedChannel blue[StripSz] = {};
 bool driverReady = false;
 bool outputEnabled = true;
 uint16_t physicalMask = 0;
+uint32_t lastFadeFrameUs = 0;
 
 uint8_t peakR = 216;
 uint8_t peakG = 58;
@@ -27,6 +28,9 @@ uint8_t peakB = 4;
 constexpr uint16_t bootSequenceStepDelayMs = 120;
 constexpr uint8_t fadeStepUp = 18;
 constexpr uint8_t fadeStepDown = 12;
+// Match the established 10 ms main-loop behavior, but decouple fades from
+// serial and display workload.
+constexpr uint32_t fadeFramePeriodUs = 10000;
 
 uint8_t stepToward(uint8_t current, uint8_t target, uint8_t step) {
   if (current == target) return current;
@@ -114,6 +118,7 @@ void init() {
     renderFrame();
     strip.show();
   }
+  lastFadeFrameUs = micros();
 }
 
 void playBootSequence(BootStepCallback callback) {
@@ -168,6 +173,7 @@ void setEnabled(bool enabled) {
   snapAllChannelsToTarget();
   clearPhysicalStrip();
   if (driverReady) strip.show();
+  lastFadeFrameUs = micros();
 }
 
 bool isEnabled() { return outputEnabled; }
@@ -181,6 +187,13 @@ void setBaseColor(uint8_t r, uint8_t g, uint8_t b) {
 
 void update() {
   if (!driverReady || !outputEnabled) return;
+  const uint32_t now = micros();
+  const uint32_t elapsed = now - lastFadeFrameUs;
+  if (elapsed < fadeFramePeriodUs) return;
+  // Do not burst through missed frames after a long display or serial task.
+  lastFadeFrameUs = elapsed >= fadeFramePeriodUs * 4
+                        ? now
+                        : lastFadeFrameUs + fadeFramePeriodUs;
   if (!advanceFadeFrame()) return;
   renderFrame();
   strip.show();
