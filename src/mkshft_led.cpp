@@ -43,6 +43,13 @@ uint8_t stepToward(uint8_t current, uint8_t target, uint8_t step) {
   return current - (step < delta ? step : delta);
 }
 
+uint8_t linearLevelForOutput(uint8_t output) {
+  for (uint16_t level = 0; level < 256; ++level) {
+    if (gamma8[level] >= output) return static_cast<uint8_t>(level);
+  }
+  return 255;
+}
+
 bool advanceChannel(LedChannel &channel, uint8_t riseStep, uint8_t fallStep) {
   const uint8_t next =
       stepToward(channel.current, channel.target,
@@ -67,9 +74,9 @@ void applyTargets() {
     const uint8_t physicalIndex = MatrixLookup[logicalRow][logicalCol];
     const bool active = states[logicalIndex];
     if (active) physicalMask |= static_cast<uint16_t>(1U << physicalIndex);
-    red[logicalIndex].target = active ? peakR : 0;
-    green[logicalIndex].target = active ? peakG : 0;
-    blue[logicalIndex].target = active ? peakB : 0;
+    red[logicalIndex].target = active ? linearLevelForOutput(peakR) : 0;
+    green[logicalIndex].target = active ? linearLevelForOutput(peakG) : 0;
+    blue[logicalIndex].target = active ? linearLevelForOutput(peakB) : 0;
   }
 }
 
