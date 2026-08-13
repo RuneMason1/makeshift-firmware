@@ -1,0 +1,54 @@
+#ifndef MKSHFT_RUNTIME_H_
+#define MKSHFT_RUNTIME_H_
+
+#include <Arduino.h>
+
+namespace mkshft_runtime {
+
+constexpr uint8_t PROTOCOL_VERSION = 1;
+constexpr uint8_t MAX_COMPONENTS = 8;
+
+enum class ComponentType : uint8_t {
+  NONE = 0,
+  CAROUSEL = 1,
+  METER_BANK = 2,
+  TRANSPORT_BAR = 3,
+  LOGO_PANEL = 4,
+  BUTTON_GRID = 5,
+  LIST_PICKER = 6,
+  STATUS_CARD = 7,
+};
+
+enum class Zone : uint8_t {
+  FULL_SCREEN = 0,
+  LEFT = 1,
+  LOWER_RIGHT = 2,
+  TOP_BAR = 3,
+  OVERLAY = 4,
+};
+
+enum ComponentFlags : uint8_t {
+  ENABLED = 1U << 0,
+  PRELOAD = 1U << 1,
+};
+
+struct Component {
+  uint8_t id;
+  ComponentType type;
+  Zone zone;
+  uint8_t flags;
+};
+
+void initCompatibilityDefaults();
+bool beginManifest(uint8_t version, uint8_t expectedCount);
+bool addComponent(const Component &component);
+bool commitManifest();
+void cancelManifest();
+
+bool isEnabled(ComponentType type);
+bool shouldPreload(ComponentType type);
+uint8_t activeComponentCount();
+
+} // namespace mkshft_runtime
+
+#endif

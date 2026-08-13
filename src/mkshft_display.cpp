@@ -52,9 +52,11 @@ void init() {
     tft.setRotation(3); // landscape
 
     Serial.println("Clearing screen");
+    memset(internal_fb, 0, sizeof(internal_fb));
+    memset(fb, 0, sizeof(fb));
     tft.clear(0);
 
-    tft.update(fb);
+    tft.update(fb, true);
   }
 }
 

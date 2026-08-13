@@ -1,26 +1,16 @@
 #include <mkshft_ui.hpp>
+#include <mkshft_assets.hpp>
+#include <mkshft_display.hpp>
+#include <mkshft_media_cache.hpp>
+#include <eos_splash565.h>
+#include <makeshift_boot_splash565.h>
 
 namespace mkshft_ui {
 
 Layout *currentLayout;
 std::map<std::string, Layout> layouts;
 
-DMAMEM uint16_t gameArtwork[GAME_ART_CACHE_SLOTS]
-                              [GAME_ART_MAX_WIDTH * GAME_ART_MAX_HEIGHT];
-struct ArtworkSlot {
-  uint8_t gameIndex;
-  uint16_t width;
-  uint16_t height;
-  bool valid;
-};
-ArtworkSlot artworkSlots[GAME_ART_CACHE_SLOTS] = {};
 char gameTitle[GAME_TITLE_MAX_LENGTH + 1] = {};
-uint16_t gameArtWidth = 0;
-uint16_t gameArtHeight = 0;
-uint32_t gamePixelsReceived = 0;
-uint8_t gameTransferIndex = 0;
-uint8_t gameTransferSlot = 0;
-bool gameTransferActive = false;
 bool gameCardVisible = false;
 bool usbConnected = false;
 
@@ -41,6 +31,7 @@ bool goXlrVisible = false;
 uint32_t goXlrShownMs = 0;
 char goXlrChannelLabel[33] = "Chromecast";
 uint8_t goXlrChannelPercent = 0;
+bool goXlrChannelMuted = false;
 bool goXlrPercentKnown = false;
 constexpr size_t NOW_PLAYING_MAX_LENGTH = 160;
 char nowPlaying[NOW_PLAYING_MAX_LENGTH + 1] = {};
@@ -53,8 +44,51 @@ bool nowPlayingHoldingAtEnd = false;
 constexpr uint32_t GAME_CARD_TIMEOUT_MS = 5000;
 constexpr uint32_t ACTION_GLYPH_TIMEOUT_MS = 1500;
 constexpr uint32_t GOXLR_TIMEOUT_MS = 3000;
+constexpr uint16_t BOOT_EOS_HOLD_MS = 900;
+constexpr uint16_t BOOT_MAKESHIFT_HOLD_MS = 1200;
+uint8_t homeSplashImageId = SPLASH_HOME_DEFAULT;
+RGB32 usbConnectedColor(216, 58, 4);
+RGB32 usbDisconnectedColor(72, 24, 8);
 
 namespace {
+const Image<RGB565> &selectedHomeSplash() {
+  switch (homeSplashImageId) {
+  case SPLASH_MAKESHIFT:
+    return makeshift_boot_splash565;
+  case SPLASH_EOS:
+    return eos_splash565;
+  case SPLASH_HOME_DEFAULT:
+  default:
+    return splash565;
+  }
+}
+
+void presentBootSplash(const Image<RGB565> &image) {
+  defaultCanvas->blit(image, iVec2(0, 0));
+  if (mkshft_display::displayReady) {
+    mkshft_display::tft.update(mkshft_display::fb, true);
+  }
+}
+
+void presentBootStep(uint8_t, uint8_t) {
+}
+
+bool drawCachedGlyph(uint8_t assetId, int centerX, int centerY,
+                     const RGB32 &color, uint8_t scale = 1) {
+  const mkshft_assets::Asset *asset = mkshft_assets::find(assetId);
+  if (asset == nullptr || asset->format != mkshft_assets::Format::MONO_1BPP)
+    return false;
+  const int left = centerX - (asset->width * scale) / 2;
+  const int top = centerY - (asset->height * scale) / 2;
+  for (uint16_t bit = 0; bit < asset->width * asset->height; ++bit) {
+    if ((asset->data[bit / 8] & (0x80U >> (bit % 8))) == 0) continue;
+    const int x = left + (bit % asset->width) * scale;
+    const int y = top + (bit / asset->width) * scale;
+    defaultCanvas->fillRect(iBox2(x, x + scale - 1, y, y + scale - 1), color);
+  }
+  return true;
+}
+
 int textWidth(const char *text) {
   int width = 0;
   for (const char *cursor = text; *cursor != '\0'; ++cursor) {
@@ -85,18 +119,31 @@ void drawPersistentGoXlrLabel() {
   if (!usbConnected || !goXlrPercentKnown) return;
   constexpr int right = 311;
   constexpr int labelBaseline = 230;
+  constexpr int mutedIndicatorLeft = 196;
+  constexpr int mutedIndicatorRight = 202;
+  constexpr int mutedIndicatorTop = 220;
+  constexpr int mutedIndicatorBottom = 226;
   char percent[8] = {};
   snprintf(percent, sizeof(percent), "%u%%", goXlrChannelPercent);
   const int labelWidth = textWidth(goXlrChannelLabel);
   const int percentWidth = textWidth(percent);
+  const RGB32 mutedColor(255, 64, 64);
+  const RGB32 normalColor(216, 58, 4);
   // Always clear the full badge width so a shorter channel name cannot leave
   // pixels behind from a previous label such as "Chromecast".
-  defaultCanvas->fillRect(iBox2(196, 319, 190, 239), RGB32(8, 13, 18));
+  defaultCanvas->fillRect(iBox2(190, 319, 190, 239), RGB32(8, 13, 18));
   defaultCanvas->drawText(percent, iVec2(right - percentWidth, 207),
                           *baseFont, RGB32(245, 240, 220));
+  if (goXlrChannelMuted) {
+    defaultCanvas->fillRect(
+        iBox2(mutedIndicatorLeft, mutedIndicatorRight, mutedIndicatorTop,
+              mutedIndicatorBottom),
+        mutedColor);
+  }
   defaultCanvas->drawText(goXlrChannelLabel,
                           iVec2(right - labelWidth, labelBaseline),
-                          *baseFont, RGB32(216, 58, 4));
+                          *baseFont,
+                          goXlrChannelMuted ? mutedColor : normalColor);
 }
 
 void drawGameTitle(const char *title) {
@@ -136,11 +183,7 @@ void drawGameTitle(const char *title) {
 }
 
 int8_t findArtworkSlot(uint8_t gameIndex) {
-  for (uint8_t slot = 0; slot < GAME_ART_CACHE_SLOTS; ++slot) {
-    if (artworkSlots[slot].valid && artworkSlots[slot].gameIndex == gameIndex)
-      return slot;
-  }
-  return -1;
+  return mkshft_media_cache::findSlot(gameIndex);
 }
 
 void renderGameCard(int8_t slot) {
@@ -154,10 +197,14 @@ void renderGameCard(int8_t slot) {
   defaultCanvas->fillRect(iBox2(artX - 3, artX + artSize + 2,
                                 artY - 3, artY + artSize + 2),
                           RGB32(18, 29, 38));
-  if (slot >= 0 && artworkSlots[slot].valid) {
-    const uint16_t width = artworkSlots[slot].width;
-    const uint16_t height = artworkSlots[slot].height;
-    Image<RGB565> artwork(gameArtwork[slot], width, height);
+  const mkshft_media_cache::SlotInfo *slotData =
+      slot >= 0 ? mkshft_media_cache::slotInfo(slot) : nullptr;
+  const uint16_t *pixels =
+      slot >= 0 ? mkshft_media_cache::slotPixels(slot) : nullptr;
+  if (slotData != nullptr && pixels != nullptr) {
+    const uint16_t width = slotData->width;
+    const uint16_t height = slotData->height;
+    Image<RGB565> artwork(pixels, width, height);
     for (int y = 0; y < artSize; ++y) {
       const int sourceY = (y * height) / artSize;
       for (int x = 0; x < artSize; ++x) {
@@ -325,7 +372,7 @@ void init(Image<RGB565> *cnv) {
   currentLayout = &layouts.at("default");
 
   Serial.println("Testing UI library...");
-  splashScreen();
+  presentBootSplash(eos_splash565);
 }
 
 
@@ -342,7 +389,7 @@ void renderUI() {
 }
 
 void splashScreen() {
-  defaultCanvas->blit(splash565, iVec2(0, 0));
+  defaultCanvas->blit(selectedHomeSplash(), iVec2(0, 0));
   setUsbConnected(usbConnected);
   drawNowPlayingTicker();
   drawPersistentGoXlrLabel();
@@ -392,12 +439,25 @@ void splashScreen() {
   // layouts.at("default").
 }
 
+void playBootSequence() {
+  presentBootSplash(eos_splash565);
+  delay(BOOT_EOS_HOLD_MS);
+  presentBootSplash(makeshift_boot_splash565);
+  delay(BOOT_MAKESHIFT_HOLD_MS);
+  mkshft_ledMatrix::playBootSequence(&presentBootStep);
+  splashScreen();
+  if (mkshft_display::displayReady) {
+    mkshft_display::tft.update(mkshft_display::fb, true);
+  }
+}
+
 void setUsbConnected(bool connected) {
   usbConnected = connected;
   if (!connected) {
     goXlrPercentKnown = false;
     goXlrChannelLabel[0] = '\0';
     goXlrChannelPercent = 0;
+    goXlrChannelMuted = false;
     nowPlayingActive = false;
     nowPlaying[0] = '\0';
     nowPlayingOffset = 0;
@@ -411,75 +471,76 @@ void setUsbConnected(bool connected) {
     return;
   }
   defaultCanvas->fillRect(iBox2(0, 319, 0, 9),
-                          connected ? RGB32(216, 58, 4)
-                                    : RGB32(72, 24, 8));
+                          connected ? usbConnectedColor : usbDisconnectedColor);
+}
+
+bool applyVisualPreferences(uint8_t splashImageId, uint8_t ledR, uint8_t ledG,
+                            uint8_t ledB, uint8_t connectedR,
+                            uint8_t connectedG, uint8_t connectedB,
+                            uint8_t disconnectedR,
+                            uint8_t disconnectedG,
+                            uint8_t disconnectedB) {
+  if (splashImageId > SPLASH_EOS) return false;
+
+  homeSplashImageId = splashImageId;
+  usbConnectedColor = RGB32(connectedR, connectedG, connectedB);
+  usbDisconnectedColor = RGB32(disconnectedR, disconnectedG, disconnectedB);
+  mkshft_ledMatrix::setBaseColor(ledR, ledG, ledB);
+
+  if (!gameCardVisible && !actionGlyphVisible && !goXlrVisible) {
+    splashScreen();
+  }
+  return true;
 }
 
 bool beginGameCard(uint8_t slot, uint8_t gameIndex, const char *title,
                    size_t titleLength, uint16_t width, uint16_t height) {
+  return beginCollectionCard(slot, gameIndex, title, titleLength, width, height);
+}
+
+bool beginCollectionCard(uint8_t slot, uint8_t itemIndex, const char *title,
+                         size_t titleLength, uint16_t width, uint16_t height) {
   const bool textOnly = width == 0 && height == 0;
   const bool validArtworkSize = width > 0 && height > 0 &&
                                 width <= GAME_ART_MAX_WIDTH &&
                                 height <= GAME_ART_MAX_HEIGHT;
-  if (slot >= GAME_ART_CACHE_SLOTS || gameIndex >= cachedGameCount ||
+  if (slot >= GAME_ART_CACHE_SLOTS || itemIndex >= cachedGameCount ||
       title == nullptr || titleLength == 0 ||
-      titleLength > GAME_TITLE_MAX_LENGTH ||
-      (!textOnly && !validArtworkSize)) {
-    gameTransferActive = false;
+      titleLength > GAME_TITLE_MAX_LENGTH) {
     return false;
   }
 
-  gameArtWidth = width;
-  gameArtHeight = height;
-  gamePixelsReceived = 0;
-  gameTransferIndex = gameIndex;
-  gameTransferSlot = slot;
-  artworkSlots[slot].valid = false;
-  gameTransferActive = !textOnly;
-  return true;
+  if (!textOnly && !validArtworkSize) return false;
+  return mkshft_media_cache::beginWrite(slot, itemIndex, width, height);
 }
 
 bool writeGameArtChunk(uint32_t pixelOffset, const uint8_t *data,
                        size_t dataLength) {
-  if (!gameTransferActive || data == nullptr || dataLength == 0 ||
-      (dataLength % 2) != 0 || pixelOffset != gamePixelsReceived) {
-    return false;
-  }
+  return writeCollectionArtChunk(pixelOffset, data, dataLength);
+}
 
-  const uint32_t pixelCount = dataLength / 2;
-  const uint32_t expectedPixels = gameArtWidth * gameArtHeight;
-  if (pixelOffset + pixelCount > expectedPixels) {
-    gameTransferActive = false;
-    return false;
-  }
-
-  for (uint32_t index = 0; index < pixelCount; ++index) {
-    gameArtwork[gameTransferSlot][pixelOffset + index] =
-        (static_cast<uint16_t>(data[index * 2]) << 8) | data[index * 2 + 1];
-  }
-  gamePixelsReceived += pixelCount;
-  return true;
+bool writeCollectionArtChunk(uint32_t pixelOffset, const uint8_t *data,
+                             size_t dataLength) {
+  return mkshft_media_cache::writeChunk(pixelOffset, data, dataLength);
 }
 
 bool commitGameCard() {
-  const uint32_t expectedPixels = gameArtWidth * gameArtHeight;
-  if (!gameTransferActive || gamePixelsReceived != expectedPixels) {
-    return false;
-  }
+  return commitCollectionCard();
+}
 
-  gameTransferActive = false;
-  artworkSlots[gameTransferSlot] = {gameTransferIndex, gameArtWidth,
-                                    gameArtHeight, true};
-  if (gameCardVisible && gameTransferIndex == selectedGameIndex) {
+bool commitCollectionCard() {
+  const bool committed = mkshft_media_cache::commitWrite();
+  if (!committed) return false;
+
+  if (gameCardVisible && findArtworkSlot(selectedGameIndex) >= 0) {
     gameCardLastInteractionMs = millis();
-    renderGameCard(gameTransferSlot);
+    renderGameCard(findArtworkSlot(selectedGameIndex));
   }
-  return true;
+  return committed;
 }
 
 void showHomeScreen() {
   const bool wasUsbConnected = usbConnected;
-  gameTransferActive = false;
   gameCardVisible = false;
   gameCardLastInteractionMs = 0;
   actionGlyphVisible = false;
@@ -491,28 +552,41 @@ void showHomeScreen() {
 }
 
 bool beginGameList(uint8_t expectedCount) {
+  return beginCollectionList(expectedCount);
+}
+
+bool beginCollectionList(uint8_t expectedCount) {
   if (expectedCount == 0 || expectedCount > GAME_LIST_MAX_ITEMS) return false;
   expectedGameCount = expectedCount;
   cachedGameCount = 0;
   localGameCarouselActive = false;
-  for (auto &slot : artworkSlots) slot.valid = false;
+  mkshft_media_cache::invalidateAll();
   return true;
 }
 
 bool addGameListItem(const char *appId, size_t appIdLength, const char *title,
                      size_t titleLength) {
-  if (cachedGameCount >= expectedGameCount || appId == nullptr || title == nullptr ||
-      appIdLength == 0 || appIdLength > GAME_APP_ID_MAX_LENGTH ||
+  return addCollectionListItem(appId, appIdLength, title, titleLength);
+}
+
+bool addCollectionListItem(const char *itemId, size_t itemIdLength,
+                           const char *title, size_t titleLength) {
+  if (cachedGameCount >= expectedGameCount || itemId == nullptr || title == nullptr ||
+      itemIdLength == 0 || itemIdLength > GAME_APP_ID_MAX_LENGTH ||
       titleLength == 0 || titleLength > GAME_TITLE_MAX_LENGTH) return false;
   CachedGame &game = cachedGames[cachedGameCount++];
-  memcpy(game.appId, appId, appIdLength);
-  game.appId[appIdLength] = '\0';
+  memcpy(game.appId, itemId, itemIdLength);
+  game.appId[itemIdLength] = '\0';
   memcpy(game.title, title, titleLength);
   game.title[titleLength] = '\0';
   return true;
 }
 
 bool commitGameList() {
+  return commitCollectionList();
+}
+
+bool commitCollectionList() {
   if (cachedGameCount == 0 || cachedGameCount != expectedGameCount) return false;
   selectedGameIndex = 0;
   localGameCarouselActive = true;
@@ -520,9 +594,14 @@ bool commitGameList() {
 }
 
 bool isLocalGameCarouselActive() { return localGameCarouselActive; }
+bool isLocalCollectionActive() { return isLocalGameCarouselActive(); }
 bool isGameCardVisible() { return gameCardVisible; }
 
 void moveLocalGameSelection(int delta) {
+  moveLocalCollectionSelection(delta);
+}
+
+void moveLocalCollectionSelection(int delta) {
   if (!localGameCarouselActive || cachedGameCount == 0 || delta == 0) return;
   const bool wasVisible = gameCardVisible;
   if (!wasVisible) {
@@ -536,12 +615,15 @@ void moveLocalGameSelection(int delta) {
   strncpy(gameTitle, cachedGames[selectedGameIndex].title, GAME_TITLE_MAX_LENGTH);
   gameTitle[GAME_TITLE_MAX_LENGTH] = '\0';
   gameCardVisible = true;
-  gameTransferActive = false;
   gameCardLastInteractionMs = millis();
   renderGameCard(findArtworkSlot(selectedGameIndex));
 }
 
 bool updateGameCarouselTimeout() {
+  return updateLocalCollectionTimeout();
+}
+
+bool updateLocalCollectionTimeout() {
   const uint32_t now = millis();
   const bool gameExpired = gameCardVisible && gameCardLastInteractionMs != 0 &&
       static_cast<uint32_t>(now - gameCardLastInteractionMs) >=
@@ -562,63 +644,76 @@ void updateOverlayTimeout() {
   }
 }
 
-void showGoXlrStatus(bool adjusting, const char *name, size_t nameLength,
-                     uint8_t percent) {
+void showGoXlrStatus(bool adjusting, bool muted, const char *name,
+                     size_t nameLength, uint8_t percent) {
   char label[33] = {};
   const size_t copyLength = min(nameLength, sizeof(label) - 1);
   memcpy(label, name, copyLength);
   memcpy(goXlrChannelLabel, label, copyLength + 1);
   goXlrChannelPercent = min<uint8_t>(percent, 100);
+  goXlrChannelMuted = muted;
   goXlrPercentKnown = true;
   goXlrVisible = false;
   goXlrShownMs = 0;
   drawPersistentGoXlrLabel();
 }
 
-bool showActionGlyph(uint8_t glyphId) {
-  if (glyphId < 1 || glyphId > 3) return false;
-  gameTransferActive = false;
+bool showOverlayGlyph(uint8_t glyphId) {
+  if (glyphId < 1 || glyphId > 5) return false;
   gameCardVisible = false;
   actionGlyphVisible = true;
   actionGlyphShownMs = millis();
 
-  const RGB32 panel(13, 20, 26);
-  const RGB32 panelEdge(54, 66, 74);
-  const RGB32 orange(216, 58, 4);
-  const RGB32 foreground(245, 240, 220);
-  constexpr int left = 68;
-  constexpr int right = 251;
-  constexpr int top = 47;
-  constexpr int bottom = 184;
-  defaultCanvas->fillRect(iBox2(left, right, top, bottom), panelEdge);
-  defaultCanvas->fillRect(iBox2(left + 3, right - 3, top + 3, bottom - 3), panel);
-  defaultCanvas->fillRect(iBox2(left + 3, right - 3, top + 3, top + 8), orange);
+  const RGB32 shadow(3, 5, 7);
+  const RGB32 panel(43, 43, 43);
+  const RGB32 foreground(248, 248, 246);
+  constexpr int left = 72;
+  constexpr int right = 247;
+  constexpr int top = 46;
+  constexpr int bottom = 193;
+  constexpr int radius = 20;
+  defaultCanvas->fillRoundRect(iBox2(left + 4, right + 4, top + 5, bottom + 5),
+                               radius, shadow, 1.0f);
+  defaultCanvas->fillRoundRect(iBox2(left, right, top, bottom), radius, panel,
+                               1.0f);
 
-  const char *title = glyphId == 1 ? "PREVIOUS"
-                      : glyphId == 3 ? "NEXT"
-                                     : "MEDIA";
-  defaultCanvas->drawText(title, iVec2((320 - textWidth(title)) / 2, 77),
-                          *baseFont, orange);
-  if (glyphId == 1) {
-    defaultCanvas->fillRect(iBox2(92, 105, 101, 157), foreground);
-    defaultCanvas->fillTriangle(iVec2(155, 101), iVec2(155, 157),
-                                iVec2(108, 129), foreground, foreground, 1.0f);
-    defaultCanvas->fillTriangle(iVec2(211, 101), iVec2(211, 157),
-                                iVec2(164, 129), foreground, foreground, 1.0f);
+  if (drawCachedGlyph(glyphId, 160, 120, foreground, 2)) {
+    return true;
+  } else if (glyphId == 1) {
+    defaultCanvas->fillRect(iBox2(106, 113, 92, 148), foreground);
+    defaultCanvas->fillTriangle(iVec2(157, 92), iVec2(157, 148),
+                                iVec2(110, 120), foreground, foreground, 1.0f);
+    defaultCanvas->fillTriangle(iVec2(213, 92), iVec2(213, 148),
+                                iVec2(166, 120), foreground, foreground, 1.0f);
   } else if (glyphId == 3) {
-    defaultCanvas->fillTriangle(iVec2(108, 101), iVec2(108, 157),
-                                iVec2(155, 129), foreground, foreground, 1.0f);
-    defaultCanvas->fillTriangle(iVec2(164, 101), iVec2(164, 157),
-                                iVec2(211, 129), foreground, foreground, 1.0f);
-    defaultCanvas->fillRect(iBox2(214, 227, 101, 157), foreground);
+    defaultCanvas->fillTriangle(iVec2(100, 92), iVec2(100, 148),
+                                iVec2(147, 120), foreground, foreground, 1.0f);
+    defaultCanvas->fillTriangle(iVec2(156, 92), iVec2(156, 148),
+                                iVec2(203, 120), foreground, foreground, 1.0f);
+    defaultCanvas->fillRect(iBox2(206, 219, 92, 148), foreground);
+  } else if (glyphId == 4) {
+    defaultCanvas->fillRect(iBox2(108, 128, 104, 136), foreground);
+    defaultCanvas->fillTriangle(iVec2(128, 104), iVec2(128, 136),
+                                iVec2(154, 120), foreground, foreground, 1.0f);
+    defaultCanvas->drawCircle(iVec2(172, 120), 16, foreground);
+    defaultCanvas->drawCircle(iVec2(172, 120), 28, foreground);
+    defaultCanvas->drawLine(iVec2(104, 154), iVec2(216, 86), foreground);
+  } else if (glyphId == 5) {
+    defaultCanvas->fillRect(iBox2(108, 128, 104, 136), foreground);
+    defaultCanvas->fillTriangle(iVec2(128, 104), iVec2(128, 136),
+                                iVec2(154, 120), foreground, foreground, 1.0f);
+    defaultCanvas->drawCircle(iVec2(172, 120), 16, foreground);
+    defaultCanvas->drawCircle(iVec2(172, 120), 28, foreground);
   } else {
-    defaultCanvas->fillTriangle(iVec2(94, 101), iVec2(94, 157),
-                                iVec2(140, 129), foreground, foreground, 1.0f);
-    defaultCanvas->fillRect(iBox2(169, 184, 101, 157), foreground);
-    defaultCanvas->fillRect(iBox2(199, 214, 101, 157), foreground);
+    defaultCanvas->fillTriangle(iVec2(99, 92), iVec2(99, 148),
+                                iVec2(145, 120), foreground, foreground, 1.0f);
+    defaultCanvas->fillRect(iBox2(174, 189, 92, 148), foreground);
+    defaultCanvas->fillRect(iBox2(204, 219, 92, 148), foreground);
   }
   return true;
 }
+
+bool showActionGlyph(uint8_t glyphId) { return showOverlayGlyph(glyphId); }
 
 void setNowPlaying(bool playing, const char *text, size_t textLength) {
   if (text == nullptr || textLength == 0 || textLength > NOW_PLAYING_MAX_LENGTH)
@@ -662,6 +757,10 @@ void updateNowPlayingTicker() {
 }
 
 const char *selectedGameAppId() {
+  return selectedCollectionItemId();
+}
+
+const char *selectedCollectionItemId() {
   return cachedGameCount == 0 ? "" : cachedGames[selectedGameIndex].appId;
 }
 } // namespace mkshft_ui

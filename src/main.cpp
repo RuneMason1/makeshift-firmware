@@ -14,10 +14,12 @@ static char *serialNumber;
 
 // MakeShift libraries
 #include <mkshft_lisp.hpp>
+#include <mkshft_assets.hpp>
 #include <mkshft_core.hpp>
 #include <mkshft_ctrl.hpp>
 #include <mkshft_display.hpp>
 #include <mkshft_led.hpp>
+#include <mkshft_runtime.hpp>
 #include <mkshft_ui.hpp>
 
 #define LOGLVL_MKSHFT_MAIN LOGLVL_DEBUG
@@ -144,6 +146,7 @@ void setup()
 #endif
 
   mkshft_ctrl::packetSerial.setPacketHandler(&onPacketReceived);
+  mkshft_runtime::initCompatibilityDefaults();
 
   // TODO: organise define constants to MKSHFT
 #ifdef DEBUG
@@ -176,6 +179,7 @@ void setup()
 
 #ifdef MKSHFT_UI_H_
   mkshft_ui::init(&canvas);
+  mkshft_ui::playBootSequence();
 #endif
 
 #ifdef DEBUG
@@ -237,33 +241,25 @@ void loop()
   statePrev = stateCurr;
   stateCurr = core::getState();
 
-  if (mkshft_ui::isLocalGameCarouselActive()) {
+  if (mkshft_runtime::isEnabled(mkshft_runtime::ComponentType::CAROUSEL) &&
+      mkshft_ui::isLocalCollectionActive()) {
     if (stateCurr.dialRelative[0] != 0) {
-      mkshft_ui::moveLocalGameSelection(stateCurr.dialRelative[0]);
+      mkshft_ui::moveLocalCollectionSelection(stateCurr.dialRelative[0]);
       mkshft_ctrl::sendString(std::string("GAME_SELECT:") +
-                              mkshft_ui::selectedGameAppId());
+                              mkshft_ui::selectedCollectionItemId());
     }
     if (statePrev.button[0] != stateCurr.button[0] &&
         stateCurr.button[0] == core::ON && mkshft_ui::isGameCardVisible()) {
       mkshft_ctrl::sendString(std::string("GAME_LAUNCH:") +
-                              mkshft_ui::selectedGameAppId());
+                              mkshft_ui::selectedCollectionItemId());
       mkshft_ui::showHomeScreen();
     }
   }
-  if (mkshft_ui::updateGameCarouselTimeout()) {
+  if (mkshft_ui::updateLocalCollectionTimeout()) {
     mkshft_ctrl::sendString("GAME_PRELOAD_FIRST");
   }
   mkshft_ui::updateOverlayTimeout();
   mkshft_ui::updateNowPlayingTicker();
-
-  if (statePrev.button[3] != stateCurr.button[3] &&
-      stateCurr.button[3] == core::ON) {
-    mkshft_ctrl::sendString("GOXLR_MUTE_TOGGLE");
-  }
-  if (stateCurr.dialRelative[3] != 0) {
-    mkshft_ctrl::sendString(std::string("GOXLR_ADJUST:") +
-                            std::to_string(stateCurr.dialRelative[3]));
-  }
 
   // check button states
   for (int i = 0; i < core::szButtonArray; i++)
@@ -312,12 +308,10 @@ void loop()
   if (stateChanged == true)
   {
     core::state_t stateToSend = stateCurr;
-    if (mkshft_ui::isLocalGameCarouselActive()) {
+    if (mkshft_ui::isLocalCollectionActive()) {
       stateToSend.dialRelative[0] = 0;
       stateToSend.button[0] = false;
     }
-    stateToSend.dialRelative[3] = 0;
-    stateToSend.button[3] = false;
     mkshft_ctrl::sendState(stateToSend);
     // core::printStateToSerial(core::getState());
   }
@@ -415,7 +409,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     const bool validLength =
         titleLength > 0 && bufSz == static_cast<size_t>(8 + titleLength);
     if (!validLength ||
-        !mkshft_ui::beginGameCard(slot, gameIndex,
+        !mkshft_ui::beginCollectionCard(slot, gameIndex,
                                   reinterpret_cast<const char *>(buffer + 8),
                                   titleLength, width, height)) {
       sendByte(MessageType::ERROR);
@@ -434,14 +428,14 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
         (static_cast<uint32_t>(buffer[1]) << 24) |
         (static_cast<uint32_t>(buffer[2]) << 16) |
         (static_cast<uint32_t>(buffer[3]) << 8) | buffer[4];
-    if (!mkshft_ui::writeGameArtChunk(pixelOffset, buffer + 5, bufSz - 5)) {
+    if (!mkshft_ui::writeCollectionArtChunk(pixelOffset, buffer + 5, bufSz - 5)) {
       sendByte(MessageType::ERROR);
       break;
     }
     break;
   }
   case MessageType::GAME_CARD_COMMIT:
-    sendByte(mkshft_ui::commitGameCard() ? MessageType::ACK
+    sendByte(mkshft_ui::commitCollectionCard() ? MessageType::ACK
                                          : MessageType::ERROR);
     break;
   case MessageType::SCREEN_HOME:
@@ -449,7 +443,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     sendByte(MessageType::ACK);
     break;
   case MessageType::GAME_LIST_BEGIN:
-    sendByte(bufSz == 2 && mkshft_ui::beginGameList(buffer[1])
+    sendByte(bufSz == 2 && mkshft_ui::beginCollectionList(buffer[1])
                  ? MessageType::ACK
                  : MessageType::ERROR);
     break;
@@ -462,7 +456,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     const uint8_t titleLength = buffer[2];
     const bool valid = appIdLength > 0 && titleLength > 0 &&
                        bufSz == static_cast<size_t>(3 + appIdLength + titleLength);
-    sendByte(valid && mkshft_ui::addGameListItem(
+    sendByte(valid && mkshft_ui::addCollectionListItem(
                           reinterpret_cast<const char *>(buffer + 3), appIdLength,
                           reinterpret_cast<const char *>(buffer + 3 + appIdLength),
                           titleLength)
@@ -471,16 +465,17 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     break;
   }
   case MessageType::GAME_LIST_COMMIT:
-    sendByte(mkshft_ui::commitGameList() ? MessageType::ACK
+    sendByte(mkshft_ui::commitCollectionList() ? MessageType::ACK
                                          : MessageType::ERROR);
     break;
   case MessageType::GOXLR_STATUS: {
-    // mode:u8 (0 selected, 1 adjusted), percent:u8, name:utf8
+    // flags:u8 (bit 0 adjusted, bit 1 muted), percent:u8, name:utf8
     if (bufSz < 4) {
       sendByte(MessageType::ERROR);
       break;
     }
-    mkshft_ui::showGoXlrStatus(buffer[1] != 0,
+    mkshft_ui::showGoXlrStatus((buffer[1] & 0x01) != 0,
+                               (buffer[1] & 0x02) != 0,
                                reinterpret_cast<const char *>(buffer + 3),
                                bufSz - 3, min<uint8_t>(buffer[2], 100));
     sendByte(MessageType::ACK);
@@ -498,6 +493,85 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     break;
   case MessageType::ACTION_GLYPH:
     if (bufSz != 2 || !mkshft_ui::showActionGlyph(buffer[1])) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    sendByte(MessageType::ACK);
+    break;
+  case MessageType::RUNTIME_MANIFEST_BEGIN:
+    sendByte(bufSz == 3 &&
+                     mkshft_runtime::beginManifest(buffer[1], buffer[2])
+                 ? MessageType::ACK
+                 : MessageType::ERROR);
+    break;
+  case MessageType::RUNTIME_COMPONENT: {
+    if (bufSz != 5) {
+      mkshft_runtime::cancelManifest();
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    const mkshft_runtime::Component component = {
+        buffer[1],
+        static_cast<mkshft_runtime::ComponentType>(buffer[2]),
+        static_cast<mkshft_runtime::Zone>(buffer[3]), buffer[4]};
+    if (!mkshft_runtime::addComponent(component)) {
+      mkshft_runtime::cancelManifest();
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    sendByte(MessageType::ACK);
+    break;
+  }
+  case MessageType::RUNTIME_MANIFEST_COMMIT:
+    sendByte(mkshft_runtime::commitManifest() ? MessageType::ACK
+                                              : MessageType::ERROR);
+    break;
+  case MessageType::RUNTIME_CAPABILITIES: {
+    // version, max components, component type mask, zone mask
+    const uint8_t capabilities[] = {
+        mkshft_runtime::PROTOCOL_VERSION, mkshft_runtime::MAX_COMPONENTS,
+        0xFE, 0x1F};
+    send(MessageType::RUNTIME_CAPABILITIES, capabilities,
+         sizeof(capabilities));
+    break;
+  }
+  case MessageType::ASSET_BEGIN: {
+    if (bufSz != 7) {
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    const uint16_t length =
+        (static_cast<uint16_t>(buffer[5]) << 8) | buffer[6];
+    sendByte(mkshft_assets::beginAsset(
+                 buffer[1], static_cast<mkshft_assets::Format>(buffer[2]),
+                 buffer[3], buffer[4], length)
+                 ? MessageType::ACK
+                 : MessageType::ERROR);
+    break;
+  }
+  case MessageType::ASSET_CHUNK: {
+    if (bufSz < 4) {
+      mkshft_assets::cancelTransfer();
+      sendByte(MessageType::ERROR);
+      break;
+    }
+    const uint16_t offset =
+        (static_cast<uint16_t>(buffer[1]) << 8) | buffer[2];
+    if (!mkshft_assets::writeChunk(offset, buffer + 3, bufSz - 3)) {
+      mkshft_assets::cancelTransfer();
+      sendByte(MessageType::ERROR);
+    }
+    break;
+  }
+  case MessageType::ASSET_COMMIT:
+    sendByte(mkshft_assets::commitAsset() ? MessageType::ACK
+                                          : MessageType::ERROR);
+    break;
+  case MessageType::DEVICE_VISUALS:
+    if (bufSz != 12 || buffer[1] != 1 ||
+        !mkshft_ui::applyVisualPreferences(
+            buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7],
+            buffer[8], buffer[9], buffer[10], buffer[11])) {
       sendByte(MessageType::ERROR);
       break;
     }

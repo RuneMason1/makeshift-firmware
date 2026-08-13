@@ -9,9 +9,15 @@
 
 
 #include <widget.hpp>
+#include <mkshft_led.hpp>
 #include <splash565.h>
 
 namespace mkshft_ui {
+enum SplashImageId : uint8_t {
+  SPLASH_HOME_DEFAULT = 0,
+  SPLASH_MAKESHIFT = 1,
+  SPLASH_EOS = 2,
+};
 /**
  * Layout widget
  */
@@ -52,17 +58,41 @@ void init(Image<RGB565> *cnv);
 void renderUI();
 
 void splashScreen();
+void playBootSequence();
 
 void setUsbConnected(bool connected);
+bool applyVisualPreferences(uint8_t splashImageId, uint8_t ledR, uint8_t ledG,
+                            uint8_t ledB, uint8_t usbConnectedR,
+                            uint8_t usbConnectedG, uint8_t usbConnectedB,
+                            uint8_t usbDisconnectedR,
+                            uint8_t usbDisconnectedG,
+                            uint8_t usbDisconnectedB);
 
-// Game artwork is transferred in bounded RGB565 chunks over the existing
-// SLIP transport. A card is not displayed until the complete image commits.
+// Generic collection-card artwork is transferred in bounded RGB565 chunks over
+// the existing SLIP transport. A card is not displayed until the complete
+// image commits. The current wire protocol still uses legacy GAME_* packet
+// names for compatibility with existing ctrl/agent code.
 constexpr uint16_t GAME_ART_MAX_WIDTH = 80;
 constexpr uint16_t GAME_ART_MAX_HEIGHT = 80;
-constexpr uint8_t GAME_ART_CACHE_SLOTS = 5;
+constexpr uint8_t GAME_ART_CACHE_SLOTS = 7;
 constexpr size_t GAME_TITLE_MAX_LENGTH = 48;
 constexpr size_t GAME_APP_ID_MAX_LENGTH = 12;
 constexpr size_t GAME_LIST_MAX_ITEMS = 64;
+
+bool beginCollectionCard(uint8_t slot, uint8_t itemIndex, const char *title,
+                         size_t titleLength, uint16_t width,
+                         uint16_t height);
+bool writeCollectionArtChunk(uint32_t pixelOffset, const uint8_t *data,
+                             size_t dataLength);
+bool commitCollectionCard();
+bool beginCollectionList(uint8_t expectedCount);
+bool addCollectionListItem(const char *itemId, size_t itemIdLength,
+                           const char *title, size_t titleLength);
+bool commitCollectionList();
+bool isLocalCollectionActive();
+void moveLocalCollectionSelection(int delta);
+bool updateLocalCollectionTimeout();
+const char *selectedCollectionItemId();
 
 bool beginGameCard(uint8_t slot, uint8_t gameIndex, const char *title,
                    size_t titleLength, uint16_t width, uint16_t height);
@@ -78,9 +108,10 @@ bool isLocalGameCarouselActive();
 bool isGameCardVisible();
 void moveLocalGameSelection(int delta);
 bool updateGameCarouselTimeout();
-void showGoXlrStatus(bool adjusting, const char *name, size_t nameLength,
-                     uint8_t percent);
+void showGoXlrStatus(bool adjusting, bool muted, const char *name,
+                     size_t nameLength, uint8_t percent);
 void updateOverlayTimeout();
+bool showOverlayGlyph(uint8_t glyphId);
 bool showActionGlyph(uint8_t glyphId);
 void setNowPlaying(bool playing, const char *text, size_t textLength);
 void updateNowPlayingTicker();

@@ -21,9 +21,9 @@ bool driverReady = false;
 bool outputEnabled = true;
 uint16_t physicalMask = 0;
 
-constexpr uint8_t peakR = 216;
-constexpr uint8_t peakG = 58;
-constexpr uint8_t peakB = 4;
+uint8_t peakR = 216;
+uint8_t peakG = 58;
+uint8_t peakB = 4;
 constexpr uint16_t bootSequenceStepDelayMs = 120;
 constexpr uint8_t fadeStepUp = 18;
 constexpr uint8_t fadeStepDown = 12;
@@ -53,24 +53,6 @@ void clearPhysicalStrip() {
        ++physicalIndex) {
     strip.setPixel(physicalIndex, 0, 0, 0);
   }
-}
-
-void runBootSequence() {
-  if (!driverReady || !outputEnabled) return;
-
-  // Sweep raw physical LED indices to separate strip propagation problems
-  // from the current 16-button logical mapping.
-  for (uint8_t physicalIndex = 0; physicalIndex < PhysicalStripSz;
-       ++physicalIndex) {
-    clearPhysicalStrip();
-    strip.setPixel(physicalIndex, peakR, peakG, peakB);
-    strip.show();
-    delay(bootSequenceStepDelayMs);
-  }
-
-  clearPhysicalStrip();
-  strip.show();
-  delay(bootSequenceStepDelayMs);
 }
 
 void applyTargets() {
@@ -129,10 +111,27 @@ void init() {
   if (driverReady) {
     strip.show();
     delay(1);
-    runBootSequence();
     renderFrame();
     strip.show();
   }
+}
+
+void playBootSequence(BootStepCallback callback) {
+  if (!driverReady || !outputEnabled) return;
+
+  for (uint8_t physicalIndex = 0; physicalIndex < PhysicalStripSz;
+       ++physicalIndex) {
+    clearPhysicalStrip();
+    strip.setPixel(physicalIndex, peakR, peakG, peakB);
+    strip.show();
+    if (callback != nullptr) callback(physicalIndex, PhysicalStripSz);
+    delay(bootSequenceStepDelayMs);
+  }
+
+  clearPhysicalStrip();
+  strip.show();
+  if (callback != nullptr) callback(PhysicalStripSz, PhysicalStripSz);
+  delay(bootSequenceStepDelayMs);
 }
 
 int8_t setButtonState(uint8_t buttonIndex, bool pressed) {
@@ -172,6 +171,13 @@ void setEnabled(bool enabled) {
 }
 
 bool isEnabled() { return outputEnabled; }
+
+void setBaseColor(uint8_t r, uint8_t g, uint8_t b) {
+  peakR = r;
+  peakG = g;
+  peakB = b;
+  applyTargets();
+}
 
 void update() {
   if (!driverReady || !outputEnabled) return;

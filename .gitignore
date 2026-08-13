@@ -10,6 +10,9 @@ build/
 # they are deliberately force-added for a published release.
 firmware-builds/*.hex
 firmware-builds/*.hex.sha256
+firmware-builds/*.zip
+!firmware-builds/published/*.hex
+!firmware-builds/published/*.hex.sha256
 
 documentation/build/
 documentation/source/_*

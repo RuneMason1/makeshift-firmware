@@ -7,6 +7,8 @@ This is the code that runs on the MakeShift device itself to read button inputs,
 
 The MakeShift is built on top of the [[https://www.pjrc.com/store/teensy40.html][Teensy 4.0]]
 
+For current reusable-module guidance, see [[./docs/firmware-modules.md][docs/firmware-modules.md]]
+
 ** Installing or Updating firmware
 
 The easiest way to install firmware right now is through getting a .HEX file and uploading it with the Teensy Loader tool that comes bundled with [[https://www.pjrc.com/teensy/td_download.html][Teensyduino]]

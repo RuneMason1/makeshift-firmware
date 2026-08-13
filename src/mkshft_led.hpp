@@ -5,6 +5,8 @@
 
 namespace mkshft_ledMatrix {
 
+using BootStepCallback = void (*)(uint8_t stepIndex, uint8_t stepCount);
+
 const uint8_t LED_PIN = 8;
 const uint8_t RowSz = 4;
 const uint8_t ColSz = 4;
@@ -25,6 +27,7 @@ const uint8_t StripLookup[RowSz * ColSz][2] = {
     {2, 3}, {2, 2}, {2, 1}, {2, 0}, {3, 0}, {3, 1}, {3, 2}, {3, 3}};
 
 void init();
+void playBootSequence(BootStepCallback callback = nullptr);
 void post();
 void update();
 void setEnabled(bool enabled);
@@ -33,6 +36,7 @@ bool isReady();
 int8_t setButtonState(uint8_t buttonIndex, bool pressed);
 uint16_t activePhysicalMask();
 uint32_t outputPadConfig();
+void setBaseColor(uint8_t r, uint8_t g, uint8_t b);
 
 void colorStripPixel(uint8_t row, uint8_t col, uint8_t r, uint8_t g, uint8_t b);
 void colorStripPixel(uint8_t row, uint8_t col, Color color);
