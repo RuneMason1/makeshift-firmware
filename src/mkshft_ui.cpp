@@ -55,6 +55,19 @@ RGB32 usbConnectedColor(216, 58, 4);
 RGB32 usbDisconnectedColor(72, 24, 8);
 
 namespace {
+enum HomeDirty : uint8_t {
+  DIRTY_NONE = 0,
+  DIRTY_WALLPAPER = 1U << 0,
+  DIRTY_CONNECTION = 1U << 1,
+  DIRTY_UPPER = 1U << 2,
+  DIRTY_LOWER_LEFT = 1U << 3,
+  DIRTY_LOWER_RIGHT = 1U << 4,
+  DIRTY_ALL = DIRTY_WALLPAPER | DIRTY_CONNECTION | DIRTY_UPPER |
+              DIRTY_LOWER_LEFT | DIRTY_LOWER_RIGHT,
+};
+
+uint8_t dirtyHomeZones = DIRTY_ALL;
+
 const Image<RGB565> &selectedHomeSplash() {
   switch (homeSplashImageId) {
   case SPLASH_MAKESHIFT:
@@ -65,6 +78,13 @@ const Image<RGB565> &selectedHomeSplash() {
   default:
     return splash565;
   }
+}
+
+void invalidateHome(uint8_t zones) { dirtyHomeZones |= zones; }
+
+void restoreWallpaperRegion(const iBox2 &region) {
+  const Image<RGB565> background = selectedHomeSplash().getCrop(region);
+  defaultCanvas->blit(background, iVec2(region.minX, region.minY));
 }
 
 void presentBootSplash(const Image<RGB565> &image) {
@@ -133,11 +153,6 @@ void drawPersistentGoXlrLabel() {
   const int percentWidth = textWidth(percent);
   const RGB32 mutedColor(255, 64, 64);
   const RGB32 normalColor(216, 58, 4);
-  // Restore the zone from the selected wallpaper so shorter labels cannot
-  // leave pixels behind without placing an opaque panel over the logo.
-  const Image<RGB565> background =
-      selectedHomeSplash().getCrop(iBox2(190, 319, 190, 239));
-  defaultCanvas->blit(background, iVec2(190, 190));
   defaultCanvas->drawText(percent, iVec2(right - percentWidth, 207),
                           *baseFont, RGB32(245, 240, 220));
   if (goXlrChannelMuted) {
@@ -164,9 +179,6 @@ void drawLowerLeftStatusBadge() {
   snprintf(percent, sizeof(percent), "%u%%", lowerLeftStatusPercent);
   const RGB32 inactiveColor(255, 64, 64);
   const RGB32 normalColor(216, 58, 4);
-  const Image<RGB565> background =
-      selectedHomeSplash().getCrop(iBox2(0, 129, 190, 239));
-  defaultCanvas->blit(background, iVec2(0, 190));
   defaultCanvas->drawText(percent, iVec2(left, 207), *baseFont,
                           RGB32(245, 240, 220));
   if (lowerLeftStatusInactive) {
@@ -178,6 +190,37 @@ void drawLowerLeftStatusBadge() {
   defaultCanvas->drawText(lowerLeftStatusLabel, iVec2(left, labelBaseline),
                           *baseFont,
                           lowerLeftStatusInactive ? inactiveColor : normalColor);
+}
+
+void composeHome() {
+  if (dirtyHomeZones == DIRTY_NONE || gameCardVisible || actionGlyphVisible ||
+      goXlrVisible)
+    return;
+
+  uint8_t zones = dirtyHomeZones;
+  dirtyHomeZones = DIRTY_NONE;
+  if ((zones & DIRTY_WALLPAPER) != 0) {
+    defaultCanvas->blit(selectedHomeSplash(), iVec2(0, 0));
+    zones |= DIRTY_CONNECTION | DIRTY_UPPER | DIRTY_LOWER_LEFT |
+             DIRTY_LOWER_RIGHT;
+  }
+  if ((zones & DIRTY_CONNECTION) != 0) {
+    defaultCanvas->fillRect(
+        iBox2(0, 319, 0, 9),
+        usbConnected ? usbConnectedColor : usbDisconnectedColor);
+  }
+  if ((zones & DIRTY_UPPER) != 0) {
+    restoreWallpaperRegion(iBox2(0, 319, 10, 31));
+    drawNowPlayingTicker();
+  }
+  if ((zones & DIRTY_LOWER_LEFT) != 0) {
+    restoreWallpaperRegion(iBox2(0, 129, 190, 239));
+    drawLowerLeftStatusBadge();
+  }
+  if ((zones & DIRTY_LOWER_RIGHT) != 0) {
+    restoreWallpaperRegion(iBox2(190, 319, 190, 239));
+    drawPersistentGoXlrLabel();
+  }
 }
 
 void drawGameTitle(const char *title) {
@@ -411,6 +454,7 @@ void init(Image<RGB565> *cnv) {
 
 
 void renderUI() {
+  composeHome();
   // auto __pair = currentLayout->renderedWidgets.begin();
   // auto __end = currentLayout->renderedWidgets.end();
   for (uint n = 0; n < currentLayout->renderingOrder.size(); n++){
@@ -423,13 +467,8 @@ void renderUI() {
 }
 
 void splashScreen() {
-  defaultCanvas->blit(selectedHomeSplash(), iVec2(0, 0));
-  defaultCanvas->fillRect(
-      iBox2(0, 319, 0, 9),
-      usbConnected ? usbConnectedColor : usbDisconnectedColor);
-  drawNowPlayingTicker();
-  drawLowerLeftStatusBadge();
-  drawPersistentGoXlrLabel();
+  invalidateHome(DIRTY_ALL);
+  composeHome();
 
   // currentLayout->addWidget(WTriangle("testTriangle", iVec2(0,0), iVec2(50,0), iVec2(0,50)));
   // currentLayout->triangles.at("testTriangle")
@@ -517,8 +556,7 @@ void setUsbConnected(bool connected) {
   if (gameCardVisible || actionGlyphVisible || goXlrVisible) {
     return;
   }
-  defaultCanvas->fillRect(iBox2(0, 319, 0, 9),
-                          connected ? usbConnectedColor : usbDisconnectedColor);
+  invalidateHome(DIRTY_CONNECTION);
 }
 
 bool applyVisualPreferences(uint8_t splashImageId, uint8_t ledR, uint8_t ledG,
@@ -706,7 +744,7 @@ bool showStatusBadge(uint8_t zone, bool, bool inactive, const char *name,
     lowerLeftStatusPercent = min<uint8_t>(percent, 100);
     lowerLeftStatusInactive = inactive;
     lowerLeftStatusKnown = true;
-    drawLowerLeftStatusBadge();
+    invalidateHome(DIRTY_LOWER_LEFT);
     return true;
   }
   memcpy(goXlrChannelLabel, label, copyLength + 1);
@@ -715,13 +753,16 @@ bool showStatusBadge(uint8_t zone, bool, bool inactive, const char *name,
   goXlrPercentKnown = true;
   goXlrVisible = false;
   goXlrShownMs = 0;
-  drawPersistentGoXlrLabel();
+  invalidateHome(DIRTY_LOWER_RIGHT);
   return true;
 }
 
 bool showOverlayGlyph(uint8_t glyphId) {
   if (glyphId < 1 || glyphId > 5) return false;
   gameCardVisible = false;
+  actionGlyphVisible = false;
+  invalidateHome(DIRTY_ALL);
+  composeHome();
   actionGlyphVisible = true;
   actionGlyphShownMs = millis();
 
@@ -794,8 +835,7 @@ void setNowPlaying(bool playing, const char *text, size_t textLength) {
   nowPlayingHoldingAtEnd = false;
   const bool wasActive = nowPlayingActive;
   nowPlayingActive = playing;
-  if (!playing && wasActive && !gameCardVisible && !actionGlyphVisible) splashScreen();
-  else if (playing) drawNowPlayingTicker();
+  if (wasActive || playing) invalidateHome(DIRTY_UPPER);
 }
 
 void updateNowPlayingTicker() {
@@ -811,12 +851,12 @@ void updateNowPlayingTicker() {
     nowPlayingOffset = 0;
     nowPlayingHoldingAtEnd = false;
     nowPlayingHoldUntilMs = now + 700;
-    drawNowPlayingTicker();
+    invalidateHome(DIRTY_UPPER);
     return;
   }
   const int maxOffset = width - 304;
   nowPlayingOffset = min(nowPlayingOffset + 2, maxOffset);
-  drawNowPlayingTicker();
+  invalidateHome(DIRTY_UPPER);
   if (nowPlayingOffset == maxOffset) {
     nowPlayingHoldingAtEnd = true;
     nowPlayingHoldUntilMs = now + 1200;
