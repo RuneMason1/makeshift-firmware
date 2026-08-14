@@ -72,12 +72,20 @@ bool applyVisualPreferences(uint8_t splashImageId, uint8_t ledR, uint8_t ledG,
 // the existing SLIP transport. A card is not displayed until the complete
 // image commits. The current wire protocol still uses legacy GAME_* packet
 // names for compatibility with existing ctrl/agent code.
-constexpr uint16_t GAME_ART_MAX_WIDTH = 80;
-constexpr uint16_t GAME_ART_MAX_HEIGHT = 80;
-constexpr uint8_t GAME_ART_CACHE_SLOTS = 7;
-constexpr size_t GAME_TITLE_MAX_LENGTH = 48;
-constexpr size_t GAME_APP_ID_MAX_LENGTH = 12;
-constexpr size_t GAME_LIST_MAX_ITEMS = 64;
+constexpr uint16_t COLLECTION_ART_MAX_WIDTH = 80;
+constexpr uint16_t COLLECTION_ART_MAX_HEIGHT = 80;
+constexpr uint8_t MEDIA_CACHE_SLOTS = 7;
+constexpr size_t COLLECTION_TITLE_MAX_LENGTH = 48;
+constexpr size_t COLLECTION_ITEM_ID_MAX_LENGTH = 12;
+constexpr size_t COLLECTION_LIST_MAX_ITEMS = 64;
+
+// Source compatibility for external code that still uses the original names.
+constexpr uint16_t GAME_ART_MAX_WIDTH = COLLECTION_ART_MAX_WIDTH;
+constexpr uint16_t GAME_ART_MAX_HEIGHT = COLLECTION_ART_MAX_HEIGHT;
+constexpr uint8_t GAME_ART_CACHE_SLOTS = MEDIA_CACHE_SLOTS;
+constexpr size_t GAME_TITLE_MAX_LENGTH = COLLECTION_TITLE_MAX_LENGTH;
+constexpr size_t GAME_APP_ID_MAX_LENGTH = COLLECTION_ITEM_ID_MAX_LENGTH;
+constexpr size_t GAME_LIST_MAX_ITEMS = COLLECTION_LIST_MAX_ITEMS;
 
 bool beginCollectionCard(uint8_t slot, uint8_t itemIndex, const char *title,
                          size_t titleLength, uint16_t width,
