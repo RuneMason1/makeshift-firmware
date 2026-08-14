@@ -48,6 +48,13 @@ enum MessageType {
   STATUS_BADGE,
 };
 
+enum class ProtocolError : uint8_t {
+  MALFORMED_PACKET = 1,
+  REJECTED_VALUE = 2,
+  INVALID_STATE = 3,
+  UNSUPPORTED = 4,
+};
+
 extern bool connected;
 
 bool getWidgets();
@@ -65,6 +72,7 @@ void sendReady();
 void sendString(std::string);
 void sendLine(std::string);
 void sendByte(MessageType t);
+void sendError(MessageType request, ProtocolError error);
 
 // wraps PacketSerial.send with a connection check
 void send(MessageType, const uint8_t *, size_t);

@@ -407,7 +407,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   case MessageType::GAME_CARD_BEGIN: {
     // slot:u8, gameIndex:u8, width:u16, height:u16, titleLength:u8, title:utf8
     if (bufSz < 8) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::MALFORMED_PACKET);
       break;
     }
     const uint8_t slot = buffer[1];
@@ -421,7 +421,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
         !mkshft_ui::beginCollectionCard(slot, gameIndex,
                                   reinterpret_cast<const char *>(buffer + 8),
                                   titleLength, width, height)) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::REJECTED_VALUE);
       break;
     }
     sendByte(MessageType::ACK);
@@ -430,7 +430,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   case MessageType::GAME_ART_CHUNK: {
     // pixelOffset:u32, pixels:RGB565 big-endian
     if (bufSz < 7) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::MALFORMED_PACKET);
       break;
     }
     const uint32_t pixelOffset =
@@ -438,49 +438,51 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
         (static_cast<uint32_t>(buffer[2]) << 16) |
         (static_cast<uint32_t>(buffer[3]) << 8) | buffer[4];
     if (!mkshft_ui::writeCollectionArtChunk(pixelOffset, buffer + 5, bufSz - 5)) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::INVALID_STATE);
       break;
     }
     break;
   }
   case MessageType::GAME_CARD_COMMIT:
-    sendByte(mkshft_ui::commitCollectionCard() ? MessageType::ACK
-                                         : MessageType::ERROR);
+    if (mkshft_ui::commitCollectionCard()) sendByte(MessageType::ACK);
+    else sendError(header, ProtocolError::INVALID_STATE);
     break;
   case MessageType::SCREEN_HOME:
     mkshft_ui::showHomeScreen();
     sendByte(MessageType::ACK);
     break;
   case MessageType::GAME_LIST_BEGIN:
-    sendByte(bufSz == 2 && mkshft_ui::beginCollectionList(buffer[1])
-                 ? MessageType::ACK
-                 : MessageType::ERROR);
+    if (bufSz != 2) sendError(header, ProtocolError::MALFORMED_PACKET);
+    else if (!mkshft_ui::beginCollectionList(buffer[1]))
+      sendError(header, ProtocolError::REJECTED_VALUE);
+    else sendByte(MessageType::ACK);
     break;
   case MessageType::GAME_LIST_ITEM: {
     if (bufSz < 4) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::MALFORMED_PACKET);
       break;
     }
     const uint8_t appIdLength = buffer[1];
     const uint8_t titleLength = buffer[2];
     const bool valid = appIdLength > 0 && titleLength > 0 &&
                        bufSz == static_cast<size_t>(3 + appIdLength + titleLength);
-    sendByte(valid && mkshft_ui::addCollectionListItem(
-                          reinterpret_cast<const char *>(buffer + 3), appIdLength,
-                          reinterpret_cast<const char *>(buffer + 3 + appIdLength),
-                          titleLength)
-                 ? MessageType::ACK
-                 : MessageType::ERROR);
+    if (!valid) sendError(header, ProtocolError::MALFORMED_PACKET);
+    else if (!mkshft_ui::addCollectionListItem(
+                 reinterpret_cast<const char *>(buffer + 3), appIdLength,
+                 reinterpret_cast<const char *>(buffer + 3 + appIdLength),
+                 titleLength))
+      sendError(header, ProtocolError::REJECTED_VALUE);
+    else sendByte(MessageType::ACK);
     break;
   }
   case MessageType::GAME_LIST_COMMIT:
-    sendByte(mkshft_ui::commitCollectionList() ? MessageType::ACK
-                                         : MessageType::ERROR);
+    if (mkshft_ui::commitCollectionList()) sendByte(MessageType::ACK);
+    else sendError(header, ProtocolError::INVALID_STATE);
     break;
   case MessageType::GOXLR_STATUS: {
     // flags:u8 (bit 0 adjusted, bit 1 muted), percent:u8, name:utf8
     if (bufSz < 4) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::MALFORMED_PACKET);
       break;
     }
     mkshft_ui::showGoXlrStatus((buffer[1] & 0x01) != 0,
@@ -492,7 +494,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   }
   case MessageType::NOW_PLAYING:
     if (bufSz <= 2 || bufSz > 161 || buffer[1] > 1) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::REJECTED_VALUE);
       break;
     }
     mkshft_ui::setNowPlaying(buffer[1] != 0,
@@ -502,21 +504,21 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     break;
   case MessageType::ACTION_GLYPH:
     if (bufSz != 2 || !mkshft_ui::showActionGlyph(buffer[1])) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::REJECTED_VALUE);
       break;
     }
     sendByte(MessageType::ACK);
     break;
   case MessageType::RUNTIME_MANIFEST_BEGIN:
-    sendByte(bufSz == 3 &&
-                     mkshft_runtime::beginManifest(buffer[1], buffer[2])
-                 ? MessageType::ACK
-                 : MessageType::ERROR);
+    if (bufSz != 3) sendError(header, ProtocolError::MALFORMED_PACKET);
+    else if (!mkshft_runtime::beginManifest(buffer[1], buffer[2]))
+      sendError(header, ProtocolError::REJECTED_VALUE);
+    else sendByte(MessageType::ACK);
     break;
   case MessageType::RUNTIME_COMPONENT: {
     if (bufSz != 5) {
       mkshft_runtime::cancelManifest();
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::MALFORMED_PACKET);
       break;
     }
     const mkshft_runtime::Component component = {
@@ -525,63 +527,64 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
         static_cast<mkshft_runtime::Zone>(buffer[3]), buffer[4]};
     if (!mkshft_runtime::addComponent(component)) {
       mkshft_runtime::cancelManifest();
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::REJECTED_VALUE);
       break;
     }
     sendByte(MessageType::ACK);
     break;
   }
   case MessageType::RUNTIME_MANIFEST_COMMIT:
-    sendByte(mkshft_runtime::commitManifest() ? MessageType::ACK
-                                              : MessageType::ERROR);
+    if (mkshft_runtime::commitManifest()) sendByte(MessageType::ACK);
+    else sendError(header, ProtocolError::INVALID_STATE);
     break;
   case MessageType::RUNTIME_CAPABILITIES: {
-    // version, max components, component type mask, zone mask
+    // Base fields stay first for v1 readers; later fields are additive.
     const uint8_t capabilities[] = {
         mkshft_runtime::PROTOCOL_VERSION, mkshft_runtime::MAX_COMPONENTS,
-        0xFE, 0x1F};
+        0xFE, 0x1F, mkshft_assets::MAX_ASSETS,
+        mkshft_ui::GAME_ART_CACHE_SLOTS, 0x00, 0xF0};
     send(MessageType::RUNTIME_CAPABILITIES, capabilities,
          sizeof(capabilities));
     break;
   }
   case MessageType::ASSET_BEGIN: {
     if (bufSz != 7) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::MALFORMED_PACKET);
       break;
     }
     const uint16_t length =
         (static_cast<uint16_t>(buffer[5]) << 8) | buffer[6];
-    sendByte(mkshft_assets::beginAsset(
-                 buffer[1], static_cast<mkshft_assets::Format>(buffer[2]),
-                 buffer[3], buffer[4], length)
-                 ? MessageType::ACK
-                 : MessageType::ERROR);
+    if (!mkshft_assets::beginAsset(
+            buffer[1], static_cast<mkshft_assets::Format>(buffer[2]),
+            buffer[3], buffer[4], length))
+      sendError(header, ProtocolError::REJECTED_VALUE);
+    else sendByte(MessageType::ACK);
     break;
   }
   case MessageType::ASSET_CHUNK: {
     if (bufSz < 4) {
       mkshft_assets::cancelTransfer();
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::MALFORMED_PACKET);
       break;
     }
     const uint16_t offset =
         (static_cast<uint16_t>(buffer[1]) << 8) | buffer[2];
     if (!mkshft_assets::writeChunk(offset, buffer + 3, bufSz - 3)) {
       mkshft_assets::cancelTransfer();
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::INVALID_STATE);
     }
     break;
   }
   case MessageType::ASSET_COMMIT:
-    sendByte(mkshft_assets::commitAsset() ? MessageType::ACK
-                                          : MessageType::ERROR);
+    if (mkshft_assets::commitAsset()) sendByte(MessageType::ACK);
+    else sendError(header, ProtocolError::INVALID_STATE);
     break;
   case MessageType::DEVICE_VISUALS:
     if (bufSz != 12 || buffer[1] != 1 ||
         !mkshft_ui::applyVisualPreferences(
             buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7],
             buffer[8], buffer[9], buffer[10], buffer[11])) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::REJECTED_VALUE);
       break;
     }
     sendByte(MessageType::ACK);
@@ -589,7 +592,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   case MessageType::COLLECTION_INPUT_BINDING:
     if (bufSz != 3 || buffer[1] >= core::szDialArray ||
         buffer[2] >= core::szButtonArray) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::REJECTED_VALUE);
       break;
     }
     collectionDialIndex = buffer[1];
@@ -604,7 +607,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
             (buffer[2] & 0x02) != 0,
             reinterpret_cast<const char *>(buffer + 4), bufSz - 4,
             min<uint8_t>(buffer[3], 100))) {
-      sendByte(MessageType::ERROR);
+      sendError(header, ProtocolError::REJECTED_VALUE);
       break;
     }
     sendByte(MessageType::ACK);

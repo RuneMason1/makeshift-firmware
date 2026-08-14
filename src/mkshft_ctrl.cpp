@@ -79,6 +79,12 @@ void sendByte(MessageType t) {
   sendRaw(buf, 1);
 }
 
+void sendError(MessageType request, ProtocolError error) {
+  const uint8_t body[] = {static_cast<uint8_t>(request),
+                          static_cast<uint8_t>(error)};
+  send(MessageType::ERROR, body, sizeof(body));
+}
+
 void send(MessageType t, const uint8_t *body, size_t sz) {
   int size = sz + 1;
   uint8_t buf[size];
