@@ -99,6 +99,7 @@ bool addCollectionListItem(const char *itemId, size_t itemIdLength,
 bool commitCollectionList();
 bool isLocalCollectionActive();
 void moveLocalCollectionSelection(int delta);
+void showCollectionLaunchFeedback();
 bool updateLocalCollectionTimeout();
 const char *selectedCollectionItemId();
 

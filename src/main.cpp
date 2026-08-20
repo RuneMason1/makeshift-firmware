@@ -242,8 +242,11 @@ void loop()
   statePrev = stateCurr;
   stateCurr = core::getState();
 
-  if (mkshft_runtime::isEnabled(mkshft_runtime::ComponentType::CAROUSEL) &&
-      mkshft_ui::isLocalCollectionActive()) {
+  const bool collectionInputActive =
+      mkshft_ctrl::connected &&
+      mkshft_runtime::isEnabled(mkshft_runtime::ComponentType::CAROUSEL) &&
+      mkshft_ui::isLocalCollectionActive();
+  if (collectionInputActive) {
     if (stateCurr.dialRelative[collectionDialIndex] != 0) {
       mkshft_ui::moveLocalCollectionSelection(
           stateCurr.dialRelative[collectionDialIndex]);
@@ -254,9 +257,9 @@ void loop()
             stateCurr.button[collectionButtonIndex] &&
         stateCurr.button[collectionButtonIndex] == core::ON &&
         mkshft_ui::isGameCardVisible()) {
+      mkshft_ui::showCollectionLaunchFeedback();
       mkshft_ctrl::sendString(std::string("GAME_LAUNCH:") +
                               mkshft_ui::selectedCollectionItemId());
-      mkshft_ui::showHomeScreen();
     }
   }
   if (mkshft_ui::updateLocalCollectionTimeout()) {
@@ -312,7 +315,7 @@ void loop()
   if (stateChanged == true)
   {
     core::state_t stateToSend = stateCurr;
-    if (mkshft_ui::isLocalCollectionActive()) {
+    if (collectionInputActive) {
       stateToSend.dialRelative[collectionDialIndex] = 0;
       stateToSend.button[collectionButtonIndex] = false;
     }

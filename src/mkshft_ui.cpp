@@ -12,6 +12,7 @@ std::map<std::string, Layout> layouts;
 
 char gameTitle[GAME_TITLE_MAX_LENGTH + 1] = {};
 bool gameCardVisible = false;
+bool collectionLaunching = false;
 bool usbConnected = false;
 
 struct CachedGame {
@@ -292,9 +293,10 @@ void renderGameCard(int8_t slot) {
                             RGB32(151, 166, 175));
   }
 
-  const char *action = "CLICK TO PLAY";
+  const char *action = collectionLaunching ? "LAUNCHING..." : "CLICK TO PLAY";
   defaultCanvas->drawText(action, iVec2((320 - textWidth(action)) / 2, 226), *baseFont,
-                          RGB32(42, 214, 168));
+                          collectionLaunching ? RGB32(255, 184, 77)
+                                              : RGB32(42, 214, 168));
 }
 
 } // namespace
@@ -536,6 +538,7 @@ void setUsbConnected(bool connected) {
     nowPlayingHoldUntilMs = 0;
     nowPlayingHoldingAtEnd = false;
     gameCardVisible = false;
+    collectionLaunching = false;
     gameCardLastInteractionMs = 0;
     actionGlyphVisible = false;
     actionGlyphShownMs = 0;
@@ -615,6 +618,7 @@ bool commitCollectionCard() {
 
 void showHomeScreen() {
   gameCardVisible = false;
+  collectionLaunching = false;
   gameCardLastInteractionMs = 0;
   actionGlyphVisible = false;
   actionGlyphShownMs = 0;
@@ -685,6 +689,14 @@ void moveLocalCollectionSelection(int delta) {
   strncpy(gameTitle, cachedGames[selectedGameIndex].title, GAME_TITLE_MAX_LENGTH);
   gameTitle[GAME_TITLE_MAX_LENGTH] = '\0';
   gameCardVisible = true;
+  collectionLaunching = false;
+  gameCardLastInteractionMs = millis();
+  renderGameCard(findArtworkSlot(selectedGameIndex));
+}
+
+void showCollectionLaunchFeedback() {
+  if (!gameCardVisible) return;
+  collectionLaunching = true;
   gameCardLastInteractionMs = millis();
   renderGameCard(findArtworkSlot(selectedGameIndex));
 }
@@ -734,6 +746,7 @@ bool showStatusBadge(uint8_t zone, bool, bool inactive, const char *name,
 bool showOverlayGlyph(uint8_t glyphId) {
   if (glyphId < 1 || glyphId > 5) return false;
   gameCardVisible = false;
+  collectionLaunching = false;
   actionGlyphVisible = false;
   invalidateHome(DIRTY_ALL);
   composeHome();
