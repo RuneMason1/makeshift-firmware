@@ -192,7 +192,19 @@ void setup()
 #endif
 
   mkshft_ctrl::sendLine("MKSHFT:: Starting state scanning timers...");
-  
+
+  // Prime debounce and LED state synchronously. Starting the timer from an
+  // unobserved matrix state can create a burst of false button/LED edges.
+  for (uint8_t sample = 0; sample < 24; ++sample) {
+    core::updateState();
+    delay(1);
+  }
+  stateCurr = core::getState();
+  statePrev = stateCurr;
+  for (uint8_t button = 0; button < core::szButtonArray; ++button) {
+    mkshft_ledMatrix::setButtonState(button, stateCurr.button[button]);
+  }
+
 #ifdef DEBUG
   delay(500);
 #endif

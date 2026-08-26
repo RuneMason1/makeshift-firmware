@@ -111,6 +111,8 @@ bool advanceFadeFrame() {
 }
 
 void init() {
+  // Give the strip supply and data input time to settle before enabling UART DMA.
+  delay(10);
   driverReady = strip.begin();
 #if defined(__IMXRT1062__)
   // Only touch drive strength; overwriting the entire pad register can change
@@ -120,10 +122,11 @@ void init() {
 #endif
   clearPhysicalStrip();
   if (driverReady) {
-    strip.show();
-    delay(1);
-    renderFrame();
-    strip.show();
+    // Multiple black latch frames prevent retained or power-up garbage colors.
+    for (uint8_t frame = 0; frame < 3; ++frame) {
+      strip.show();
+      delay(2);
+    }
   }
   lastFadeFrameUs = micros();
 }

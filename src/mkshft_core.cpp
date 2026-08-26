@@ -356,10 +356,19 @@ void init() {
 
   for (int i = 0; i < szMatrixPollArray; i++) {
     pinMode(pollPins[i], OUTPUT);
+    digitalWrite(pollPins[i], LOW);
   }
 
   for (int i = 0; i < szMatrixScanArray; i++) {
     pinMode(scanPins[i], INPUT_PULLDOWN);
+  }
+
+  // Start from a stable released history instead of interpreting power-up
+  // zeroes as an in-progress debounce sequence.
+  for (int i = 0; i < szButtonArray; i++) {
+    buttonState[i] = false;
+    buttonEdgeEventQueue[i] = 0;
+    buttonExtendedState[i] = 0xFFFF;
   }
   Serial.println("Successfully initiated scanning pins and Encoder objects");
 }
