@@ -6,12 +6,19 @@
 namespace mkshft_assets {
 
 constexpr uint8_t MAX_ASSETS = 8;
-constexpr uint16_t MAX_ASSET_BYTES = 128;
+// Ctrl supplies visual assets for the active cue set at connect time. Keep
+// storage bounded while allowing smooth alpha glyphs without firmware art.
+constexpr uint8_t MAX_MONO_DIMENSION = 96;
+constexpr uint8_t MAX_ALPHA_DIMENSION = 64;
+constexpr uint16_t MAX_ASSET_BYTES =
+    (MAX_ALPHA_DIMENSION * MAX_ALPHA_DIMENSION) / 2;
 
 enum class Format : uint8_t {
   MONO_1BPP = 1,
   // Bounded command stream; validated before it can reach the renderer.
   VECTOR_COMMANDS = 2,
+  // Four-bit foreground opacity, packed high-nibble first.
+  ALPHA_4BPP = 3,
 };
 
 struct Asset {

@@ -92,11 +92,17 @@ bool beginAsset(uint8_t id, Format format, uint8_t width, uint8_t height,
   cancelTransfer();
   const bool mono = format == Format::MONO_1BPP;
   const bool vector = format == Format::VECTOR_COMMANDS;
-  const uint16_t expectedLength = static_cast<uint16_t>(
+  const bool alpha = format == Format::ALPHA_4BPP;
+  const uint16_t monoLength = static_cast<uint16_t>(
       (static_cast<uint16_t>(width) * height + 7) / 8);
-  if (id == 0 || (!mono && !vector) || width == 0 || height == 0 ||
-      width > (mono ? 32 : 128) || height > (mono ? 32 : 128) || length == 0 ||
-      length > MAX_ASSET_BYTES || (mono && length != expectedLength))
+  const uint16_t alphaLength = static_cast<uint16_t>(
+      (static_cast<uint16_t>(width) * height + 1) / 2);
+  if (id == 0 || (!mono && !vector && !alpha) || width == 0 || height == 0 ||
+      width > (mono ? MAX_MONO_DIMENSION : 128) ||
+      height > (mono ? MAX_MONO_DIMENSION : 128) ||
+      (alpha && (width > MAX_ALPHA_DIMENSION || height > MAX_ALPHA_DIMENSION)) ||
+      length == 0 || length > MAX_ASSET_BYTES ||
+      (mono && length != monoLength) || (alpha && length != alphaLength))
     return false;
   pending = {id, format, width, height, length, {}, false};
   received = 0;

@@ -153,6 +153,19 @@ bool drawCachedGlyph(uint8_t assetId, int centerX, int centerY,
     }
     return true;
   }
+  if (asset->format == mkshft_assets::Format::ALPHA_4BPP) {
+    const int left = centerX - asset->width / 2;
+    const int top = centerY - asset->height / 2;
+    for (uint16_t pixel = 0; pixel < asset->width * asset->height; ++pixel) {
+      const uint8_t packed = asset->data[pixel / 2];
+      const uint8_t alpha = (pixel & 1) == 0 ? packed >> 4 : packed & 0x0F;
+      if (alpha == 0) continue;
+      defaultCanvas->drawPixel<false>(
+          iVec2(left + pixel % asset->width, top + pixel / asset->width),
+          color, static_cast<float>(alpha) / 15.0f);
+    }
+    return true;
+  }
   if (asset->format != mkshft_assets::Format::MONO_1BPP) return false;
   const int left = centerX - (asset->width * scale) / 2;
   const int top = centerY - (asset->height * scale) / 2;
@@ -797,7 +810,11 @@ bool showStatusBadge(uint8_t zone, bool, bool inactive, const char *name,
 }
 
 bool showOverlayGlyph(uint8_t glyphId) {
-  if (glyphId < 1 || glyphId > 5) return false;
+  // Built-in transport fallbacks cover IDs 1-5. Cue-owned assets may use any
+  // non-zero cache ID, including the seek glyphs assigned after the original UI.
+  if (glyphId == 0 ||
+      (glyphId > 5 && mkshft_assets::find(glyphId) == nullptr))
+    return false;
   gameCardVisible = false;
   collectionLaunching = false;
   actionGlyphVisible = false;
@@ -809,12 +826,14 @@ bool showOverlayGlyph(uint8_t glyphId) {
   const RGB32 shadow(3, 5, 7);
   const RGB32 panel(43, 43, 43);
   const RGB32 foreground(248, 248, 246);
-  constexpr int left = 72;
-  constexpr int right = 247;
-  constexpr int top = 46;
-  constexpr int bottom = 193;
-  constexpr int radius = 20;
-  defaultCanvas->fillRoundRect(iBox2(left + 4, right + 4, top + 5, bottom + 5),
+  // Keep overlays focused on their 64px catalog glyph rather than obscuring
+  // most of the wallpaper with the previous full-size panel.
+  constexpr int left = 112;
+  constexpr int right = 207;
+  constexpr int top = 78;
+  constexpr int bottom = 161;
+  constexpr int radius = 14;
+  defaultCanvas->fillRoundRect(iBox2(left + 3, right + 3, top + 4, bottom + 4),
                                radius, shadow, 0.45f);
   defaultCanvas->fillRoundRect(iBox2(left, right, top, bottom), radius, panel,
                                0.72f);
