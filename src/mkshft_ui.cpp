@@ -99,8 +99,61 @@ void presentBootStep(uint8_t, uint8_t) {
 bool drawCachedGlyph(uint8_t assetId, int centerX, int centerY,
                      const RGB32 &color, uint8_t scale = 1) {
   const mkshft_assets::Asset *asset = mkshft_assets::find(assetId);
-  if (asset == nullptr || asset->format != mkshft_assets::Format::MONO_1BPP)
-    return false;
+  if (asset == nullptr) return false;
+  if (asset->format == mkshft_assets::Format::VECTOR_COMMANDS) {
+    const int left = centerX - asset->width / 2;
+    const int top = centerY - asset->height / 2;
+    auto thickLine = [&color](int x1, int y1, int x2, int y2, uint8_t width) {
+      const int half = width / 2;
+      for (int offset = -half; offset <= half; ++offset) {
+        defaultCanvas->drawLine(iVec2(x1 + offset, y1),
+                                iVec2(x2 + offset, y2), color);
+        defaultCanvas->drawLine(iVec2(x1, y1 + offset),
+                                iVec2(x2, y2 + offset), color);
+      }
+    };
+    uint16_t cursor = 0;
+    while (cursor < asset->length) {
+      const uint8_t operation = asset->data[cursor++];
+      if (operation == 0) return cursor == asset->length;
+      if (operation == 1 && cursor + 4 <= asset->length) {
+        const uint8_t *p = asset->data + cursor;
+        defaultCanvas->fillRect(iBox2(left + p[0], left + p[0] + p[2] - 1,
+                                     top + p[1], top + p[1] + p[3] - 1), color);
+        cursor += 4;
+      } else if (operation == 2 && cursor + 6 <= asset->length) {
+        const uint8_t *p = asset->data + cursor;
+        defaultCanvas->fillTriangle(iVec2(left + p[0], top + p[1]),
+                                    iVec2(left + p[2], top + p[3]),
+                                    iVec2(left + p[4], top + p[5]),
+                                    color, color, 1.0f);
+        cursor += 6;
+      } else if (operation == 3 && cursor + 5 <= asset->length) {
+        const uint8_t *p = asset->data + cursor;
+        thickLine(left + p[0], top + p[1], left + p[2], top + p[3], p[4]);
+        cursor += 5;
+      } else if (operation == 4 && cursor + 6 <= asset->length) {
+        const uint8_t *p = asset->data + cursor;
+        const float start = static_cast<int8_t>(p[3]) * 2.0f * PI / 180.0f;
+        float end = static_cast<int8_t>(p[4]) * 2.0f * PI / 180.0f;
+        if (end < start) end += 2.0f * PI;
+        int previousX = left + p[0] + lroundf(cosf(start) * p[2]);
+        int previousY = top + p[1] + lroundf(sinf(start) * p[2]);
+        for (float angle = start + 0.04f; angle <= end + 0.001f; angle += 0.04f) {
+          const int x = left + p[0] + lroundf(cosf(angle) * p[2]);
+          const int y = top + p[1] + lroundf(sinf(angle) * p[2]);
+          thickLine(previousX, previousY, x, y, p[5]);
+          previousX = x;
+          previousY = y;
+        }
+        cursor += 6;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (asset->format != mkshft_assets::Format::MONO_1BPP) return false;
   const int left = centerX - (asset->width * scale) / 2;
   const int top = centerY - (asset->height * scale) / 2;
   for (uint16_t bit = 0; bit < asset->width * asset->height; ++bit) {

@@ -10,6 +10,8 @@ constexpr uint16_t MAX_ASSET_BYTES = 128;
 
 enum class Format : uint8_t {
   MONO_1BPP = 1,
+  // Bounded command stream; validated before it can reach the renderer.
+  VECTOR_COMMANDS = 2,
 };
 
 struct Asset {
