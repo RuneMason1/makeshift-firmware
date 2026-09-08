@@ -13,8 +13,10 @@ The confirmed flashed baseline is firmware `9e10060` on
   disconnect, preventing a stale session from consuming physical controls.
 - Firmware `9e10060` and Ctrl `f57978b` added packet 32,
   `COLLECTION_PRESENTATION`, so a cue supplies its idle and activation labels.
-- Firmware `4a4fd3f` is the next unflashed candidate. It stages collection
-  lists and runtime manifests until commit, with bounded cancellation paths.
+- Firmware `74693bc` and Ctrl `8a10a66` are the next unflashed Phase 3
+  candidate. It stages collection lists, cache replacement, and runtime
+  manifests until commit, with bounded cancellation paths and acknowledged
+  runtime-asset synchronization.
 
 ## Historical direct-art baseline on 2026-09-06
 
