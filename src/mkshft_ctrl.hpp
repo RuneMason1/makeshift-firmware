@@ -57,6 +57,9 @@ enum MessageType {
   CACHE_FILE_COMMIT,
   CACHE_FILE_BIND,
   LED_INDICATOR,
+  // Collection presentation is host-owned. The device only renders the
+  // current cue's labels; it never assigns provider-specific behavior.
+  COLLECTION_PRESENTATION,
 
   // Generic names for the stable legacy collection packet values.
   COLLECTION_CARD_BEGIN = GAME_CARD_BEGIN,

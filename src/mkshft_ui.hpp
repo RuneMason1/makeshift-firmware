@@ -81,6 +81,7 @@ constexpr uint8_t MEDIA_CACHE_SLOTS = 7;
 constexpr size_t COLLECTION_TITLE_MAX_LENGTH = 48;
 constexpr size_t COLLECTION_ITEM_ID_MAX_LENGTH = 12;
 constexpr size_t COLLECTION_LIST_MAX_ITEMS = 64;
+constexpr size_t COLLECTION_ACTION_LABEL_MAX_LENGTH = 24;
 
 // Source compatibility for external code that still uses the original names.
 constexpr uint16_t GAME_ART_MAX_WIDTH = COLLECTION_ART_MAX_WIDTH;
@@ -101,6 +102,8 @@ bool beginCollectionList(uint8_t expectedCount);
 bool addCollectionListItem(const char *itemId, size_t itemIdLength,
                            const char *title, size_t titleLength);
 bool commitCollectionList();
+bool setCollectionPresentation(const char *idleLabel, size_t idleLength,
+                               const char *activeLabel, size_t activeLength);
 bool isLocalCollectionActive();
 void moveLocalCollectionSelection(int delta);
 void showCollectionLaunchFeedback();

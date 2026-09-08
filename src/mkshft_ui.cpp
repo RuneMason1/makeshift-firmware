@@ -13,6 +13,10 @@ std::map<std::string, Layout> layouts;
 char gameTitle[GAME_TITLE_MAX_LENGTH + 1] = {};
 bool gameCardVisible = false;
 bool collectionLaunching = false;
+char collectionIdleAction[COLLECTION_ACTION_LABEL_MAX_LENGTH + 1] =
+    "SELECT TO ACTIVATE";
+char collectionActiveAction[COLLECTION_ACTION_LABEL_MAX_LENGTH + 1] =
+    "ACTIVATING...";
 bool usbConnected = false;
 
 struct CachedGame {
@@ -359,7 +363,8 @@ void renderGameCard(int8_t slot) {
                             RGB32(151, 166, 175));
   }
 
-  const char *action = collectionLaunching ? "LAUNCHING..." : "CLICK TO PLAY";
+  const char *action = collectionLaunching ? collectionActiveAction
+                                           : collectionIdleAction;
   defaultCanvas->drawText(action, iVec2((320 - textWidth(action)) / 2, 226), *baseFont,
                           collectionLaunching ? RGB32(255, 184, 77)
                                               : RGB32(42, 214, 168));
@@ -756,6 +761,20 @@ bool commitCollectionList() {
   collectionLaunching = false;
   gameCardLastInteractionMs = millis();
   renderGameCard(findArtworkSlot(selectedGameIndex));
+  return true;
+}
+
+bool setCollectionPresentation(const char *idleLabel, size_t idleLength,
+                               const char *activeLabel, size_t activeLength) {
+  if (idleLabel == nullptr || activeLabel == nullptr || idleLength == 0 ||
+      activeLength == 0 || idleLength > COLLECTION_ACTION_LABEL_MAX_LENGTH ||
+      activeLength > COLLECTION_ACTION_LABEL_MAX_LENGTH) {
+    return false;
+  }
+  memcpy(collectionIdleAction, idleLabel, idleLength);
+  collectionIdleAction[idleLength] = '\0';
+  memcpy(collectionActiveAction, activeLabel, activeLength);
+  collectionActiveAction[activeLength] = '\0';
   return true;
 }
 

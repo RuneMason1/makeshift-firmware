@@ -494,6 +494,26 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     if (mkshft_ui::commitCollectionList()) sendByte(MessageType::ACK);
     else sendError(header, ProtocolError::INVALID_STATE);
     break;
+  case MessageType::COLLECTION_PRESENTATION: {
+    // idleLength:u8, activeLength:u8, idle:utf8, active:utf8. Labels belong
+    // to the host cue; firmware only owns the reusable collection renderer.
+    if (bufSz < 3) {
+      sendError(header, ProtocolError::MALFORMED_PACKET);
+      break;
+    }
+    const uint8_t idleLength = buffer[1];
+    const uint8_t activeLength = buffer[2];
+    if (bufSz != static_cast<size_t>(3 + idleLength + activeLength) ||
+        !mkshft_ui::setCollectionPresentation(
+            reinterpret_cast<const char *>(buffer + 3), idleLength,
+            reinterpret_cast<const char *>(buffer + 3 + idleLength),
+            activeLength)) {
+      sendError(header, ProtocolError::REJECTED_VALUE);
+      break;
+    }
+    sendByte(MessageType::ACK);
+    break;
+  }
   case MessageType::GOXLR_STATUS: {
     // flags:u8 (bit 0 adjusted, bit 1 muted), percent:u8, name:utf8
     if (bufSz < 4) {
