@@ -340,6 +340,7 @@ void loop()
   mkshft_ledMatrix::update();
   mkshft_assets::updateTransferTimeout();
   mkshft_media_cache::updateTransferTimeout();
+  mkshft_runtime::updateManifestTimeout();
   mkshft_ctrl::update();
 }
 
@@ -481,18 +482,24 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     const uint8_t titleLength = buffer[2];
     const bool valid = appIdLength > 0 && titleLength > 0 &&
                        bufSz == static_cast<size_t>(3 + appIdLength + titleLength);
-    if (!valid) sendError(header, ProtocolError::MALFORMED_PACKET);
-    else if (!mkshft_ui::addCollectionListItem(
-                 reinterpret_cast<const char *>(buffer + 3), appIdLength,
-                 reinterpret_cast<const char *>(buffer + 3 + appIdLength),
-                 titleLength))
+    if (!valid) {
+      mkshft_ui::cancelCollectionList();
+      sendError(header, ProtocolError::MALFORMED_PACKET);
+    } else if (!mkshft_ui::addCollectionListItem(
+                   reinterpret_cast<const char *>(buffer + 3), appIdLength,
+                   reinterpret_cast<const char *>(buffer + 3 + appIdLength),
+                   titleLength)) {
+      mkshft_ui::cancelCollectionList();
       sendError(header, ProtocolError::REJECTED_VALUE);
-    else sendByte(MessageType::ACK);
+    } else sendByte(MessageType::ACK);
     break;
   }
   case MessageType::COLLECTION_LIST_COMMIT:
     if (mkshft_ui::commitCollectionList()) sendByte(MessageType::ACK);
-    else sendError(header, ProtocolError::INVALID_STATE);
+    else {
+      mkshft_ui::cancelCollectionList();
+      sendError(header, ProtocolError::INVALID_STATE);
+    }
     break;
   case MessageType::COLLECTION_PRESENTATION: {
     // idleLength:u8, activeLength:u8, idle:utf8, active:utf8. Labels belong
@@ -570,7 +577,10 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   }
   case MessageType::RUNTIME_MANIFEST_COMMIT:
     if (mkshft_runtime::commitManifest()) sendByte(MessageType::ACK);
-    else sendError(header, ProtocolError::INVALID_STATE);
+    else {
+      mkshft_runtime::cancelManifest();
+      sendError(header, ProtocolError::INVALID_STATE);
+    }
     break;
   case MessageType::RUNTIME_CAPABILITIES: {
     // Base fields stay first for v1 readers; later fields are additive. The
@@ -634,15 +644,20 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     const uint32_t byteOffset = (static_cast<uint32_t>(buffer[1]) << 24) |
                                 (static_cast<uint32_t>(buffer[2]) << 16) |
                                 (static_cast<uint32_t>(buffer[3]) << 8) | buffer[4];
-    if (!mkshft_media_cache::writeByteChunk(byteOffset, buffer + 5, bufSz - 5))
+    if (!mkshft_media_cache::writeByteChunk(byteOffset, buffer + 5, bufSz - 5)) {
+      mkshft_media_cache::cancelWrite();
       sendError(header, ProtocolError::INVALID_STATE);
+    }
     break;
   }
   case MessageType::CACHE_FILE_COMMIT: {
     const uint16_t transactionId = bufSz == 3 ? (static_cast<uint16_t>(buffer[1]) << 8) | buffer[2] : 0;
     if (bufSz != 3) sendError(header, ProtocolError::MALFORMED_PACKET, transactionId);
     else if (mkshft_media_cache::commitKeyWrite()) sendAck(header, transactionId);
-    else sendError(header, ProtocolError::INVALID_STATE, transactionId);
+    else {
+      mkshft_media_cache::cancelWrite();
+      sendError(header, ProtocolError::INVALID_STATE, transactionId);
+    }
     break;
   }
   case MessageType::CACHE_FILE_BIND: {
@@ -700,7 +715,10 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   }
   case MessageType::ASSET_COMMIT:
     if (mkshft_assets::commitAsset()) sendByte(MessageType::ACK);
-    else sendError(header, ProtocolError::INVALID_STATE);
+    else {
+      mkshft_assets::cancelTransfer();
+      sendError(header, ProtocolError::INVALID_STATE);
+    }
     break;
   case MessageType::DEVICE_VISUALS:
     if (bufSz != 12 || buffer[1] != 1 ||

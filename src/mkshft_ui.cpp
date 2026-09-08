@@ -26,10 +26,16 @@ struct CachedGame {
 
 CachedGame cachedGames[GAME_LIST_MAX_ITEMS] = {};
 uint8_t cachedGameCount = 0;
-uint8_t expectedGameCount = 0;
 uint8_t selectedGameIndex = 0;
 bool localGameCarouselActive = false;
 uint32_t gameCardLastInteractionMs = 0;
+// Stage replacements independently so an interrupted list cannot erase the
+// currently visible carousel or its cache bindings.
+CachedGame pendingGames[GAME_LIST_MAX_ITEMS] = {};
+uint8_t pendingGameCount = 0;
+uint8_t pendingExpectedGameCount = 0;
+bool collectionListTransferActive = false;
+uint32_t collectionListLastActivityMs = 0;
 bool actionGlyphVisible = false;
 uint32_t actionGlyphShownMs = 0;
 struct StatusBadgeState {
@@ -50,6 +56,7 @@ uint32_t nowPlayingHoldUntilMs = 0;
 bool nowPlayingHoldingAtEnd = false;
 
 constexpr uint32_t GAME_CARD_TIMEOUT_MS = 5000;
+constexpr uint32_t COLLECTION_LIST_TIMEOUT_MS = 5000;
 constexpr uint32_t ACTION_GLYPH_TIMEOUT_MS = 1500;
 constexpr uint16_t BOOT_EOS_HOLD_MS = 900;
 constexpr uint16_t BOOT_MAKESHIFT_HOLD_MS = 1200;
@@ -717,12 +724,10 @@ bool beginGameList(uint8_t expectedCount) {
 
 bool beginCollectionList(uint8_t expectedCount) {
   if (expectedCount == 0 || expectedCount > GAME_LIST_MAX_ITEMS) return false;
-  expectedGameCount = expectedCount;
-  cachedGameCount = 0;
-  localGameCarouselActive = false;
-  // A new collection must not inherit item-index artwork from the previous
-  // one, but keyed assets remain reusable through CACHE_FILE_BIND.
-  mkshft_media_cache::invalidateBindings();
+  pendingExpectedGameCount = expectedCount;
+  pendingGameCount = 0;
+  collectionListTransferActive = true;
+  collectionListLastActivityMs = millis();
   return true;
 }
 
@@ -733,14 +738,16 @@ bool addGameListItem(const char *appId, size_t appIdLength, const char *title,
 
 bool addCollectionListItem(const char *itemId, size_t itemIdLength,
                            const char *title, size_t titleLength) {
-  if (cachedGameCount >= expectedGameCount || itemId == nullptr || title == nullptr ||
+  if (!collectionListTransferActive ||
+      pendingGameCount >= pendingExpectedGameCount || itemId == nullptr || title == nullptr ||
       itemIdLength == 0 || itemIdLength > GAME_APP_ID_MAX_LENGTH ||
       titleLength == 0 || titleLength > GAME_TITLE_MAX_LENGTH) return false;
-  CachedGame &game = cachedGames[cachedGameCount++];
+  CachedGame &game = pendingGames[pendingGameCount++];
   memcpy(game.appId, itemId, itemIdLength);
   game.appId[itemIdLength] = '\0';
   memcpy(game.title, title, titleLength);
   game.title[titleLength] = '\0';
+  collectionListLastActivityMs = millis();
   return true;
 }
 
@@ -749,9 +756,15 @@ bool commitGameList() {
 }
 
 bool commitCollectionList() {
-  if (cachedGameCount == 0 || cachedGameCount != expectedGameCount) return false;
+  if (!collectionListTransferActive || pendingGameCount == 0 ||
+      pendingGameCount != pendingExpectedGameCount) return false;
+  memcpy(cachedGames, pendingGames, sizeof(CachedGame) * pendingGameCount);
+  cachedGameCount = pendingGameCount;
+  cancelCollectionList();
   selectedGameIndex = 0;
   localGameCarouselActive = true;
+  // Item indices are list-local; retain keyed pixels but drop old bindings.
+  mkshft_media_cache::invalidateBindings();
   // Opening a collection is itself a visible state transition. Previously
   // the first encoder detent only committed the list; a second detent was
   // required before the selected item was drawn.
@@ -762,6 +775,13 @@ bool commitCollectionList() {
   gameCardLastInteractionMs = millis();
   renderGameCard(findArtworkSlot(selectedGameIndex));
   return true;
+}
+
+void cancelCollectionList() {
+  pendingGameCount = 0;
+  pendingExpectedGameCount = 0;
+  collectionListTransferActive = false;
+  collectionListLastActivityMs = 0;
 }
 
 bool setCollectionPresentation(const char *idleLabel, size_t idleLength,
@@ -818,6 +838,11 @@ bool updateGameCarouselTimeout() {
 
 bool updateLocalCollectionTimeout() {
   const uint32_t now = millis();
+  if (collectionListTransferActive && collectionListLastActivityMs != 0 &&
+      static_cast<uint32_t>(now - collectionListLastActivityMs) >=
+          COLLECTION_LIST_TIMEOUT_MS) {
+    cancelCollectionList();
+  }
   const bool gameExpired = gameCardVisible && gameCardLastInteractionMs != 0 &&
       static_cast<uint32_t>(now - gameCardLastInteractionMs) >=
           GAME_CARD_TIMEOUT_MS;

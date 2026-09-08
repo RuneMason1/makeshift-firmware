@@ -102,6 +102,7 @@ bool beginCollectionList(uint8_t expectedCount);
 bool addCollectionListItem(const char *itemId, size_t itemIdLength,
                            const char *title, size_t titleLength);
 bool commitCollectionList();
+void cancelCollectionList();
 bool setCollectionPresentation(const char *idleLabel, size_t idleLength,
                                const char *activeLabel, size_t activeLength);
 bool isLocalCollectionActive();

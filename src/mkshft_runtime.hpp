@@ -48,6 +48,7 @@ bool beginManifest(uint8_t version, uint8_t expectedCount);
 bool addComponent(const Component &component);
 bool commitManifest();
 void cancelManifest();
+void updateManifestTimeout();
 
 bool isEnabled(ComponentType type);
 bool shouldPreload(ComponentType type);

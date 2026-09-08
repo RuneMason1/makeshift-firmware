@@ -8,6 +8,8 @@ uint8_t activeCount = 0;
 uint8_t pendingCount = 0;
 uint8_t expectedCount = 0;
 bool transactionActive = false;
+uint32_t manifestLastActivityMs = 0;
+constexpr uint32_t MANIFEST_TIMEOUT_MS = 5000;
 
 bool validType(ComponentType type) {
   return type > ComponentType::NONE && type <= ComponentType::STATUS_CARD;
@@ -28,6 +30,7 @@ bool beginManifest(uint8_t version, uint8_t count) {
   pendingCount = 0;
   expectedCount = count;
   transactionActive = true;
+  manifestLastActivityMs = millis();
   return true;
 }
 
@@ -48,6 +51,7 @@ bool addComponent(const Component &component) {
       return false;
   }
   pendingComponents[pendingCount++] = component;
+  manifestLastActivityMs = millis();
   return true;
 }
 
@@ -64,6 +68,15 @@ void cancelManifest() {
   pendingCount = 0;
   expectedCount = 0;
   transactionActive = false;
+  manifestLastActivityMs = 0;
+}
+
+void updateManifestTimeout() {
+  if (transactionActive && manifestLastActivityMs != 0 &&
+      static_cast<uint32_t>(millis() - manifestLastActivityMs) >=
+          MANIFEST_TIMEOUT_MS) {
+    cancelManifest();
+  }
 }
 
 bool isEnabled(ComponentType type) {
