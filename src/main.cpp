@@ -553,11 +553,18 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     else sendError(header, ProtocolError::INVALID_STATE);
     break;
   case MessageType::RUNTIME_CAPABILITIES: {
-    // Base fields stay first for v1 readers; later fields are additive.
+    // Base fields stay first for v1 readers; later fields are additive. The
+    // trailing capability fields are the machine-readable source of truth.
+    const uint32_t cacheBytes = mkshft_media_cache::CACHE_CAPACITY_BYTES;
     const uint8_t capabilities[] = {
         mkshft_runtime::PROTOCOL_VERSION, mkshft_runtime::MAX_COMPONENTS,
         0xFE, 0x1F, mkshft_assets::MAX_ASSETS,
-        mkshft_ui::MEDIA_CACHE_SLOTS, 0x00, 0xF0};
+        mkshft_ui::MEDIA_CACHE_SLOTS, 0x00, 0xF0,
+        3, 0x01, 0x00, 0xF0,
+        static_cast<uint8_t>(cacheBytes >> 24),
+        static_cast<uint8_t>(cacheBytes >> 16),
+        static_cast<uint8_t>(cacheBytes >> 8),
+        static_cast<uint8_t>(cacheBytes)};
     send(MessageType::RUNTIME_CAPABILITIES, capabilities,
          sizeof(capabilities));
     char cacheStatus[64] = {};
