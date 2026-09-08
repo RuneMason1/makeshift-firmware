@@ -595,6 +595,11 @@ void playBootSequence() {
 void setUsbConnected(bool connected) {
   usbConnected = connected;
   if (!connected) {
+    // Collection input bindings are host-session state. Do not let a stale
+    // carousel consume dial/button events after Ctrl reconnects.
+    localGameCarouselActive = false;
+    gameCardVisible = false;
+    collectionLaunching = false;
     lowerLeftStatus = {};
     lowerRightStatus = {};
     nowPlayingActive = false;
