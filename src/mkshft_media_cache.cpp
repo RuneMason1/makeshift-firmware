@@ -5,6 +5,11 @@ namespace mkshft_media_cache {
 DMAMEM uint16_t cachePixels[mkshft_ui::MEDIA_CACHE_SLOTS]
                            [mkshft_ui::COLLECTION_ART_MAX_WIDTH *
                             mkshft_ui::COLLECTION_ART_MAX_HEIGHT];
+// Cache replacement is staged outside the DMA-backed display cache. This
+// preserves the currently committed image through every chunk and timeout;
+// only a complete commit replaces a slot.
+uint16_t stagedPixels[mkshft_ui::COLLECTION_ART_MAX_WIDTH *
+                      mkshft_ui::COLLECTION_ART_MAX_HEIGHT];
 SlotInfo slots[mkshft_ui::MEDIA_CACHE_SLOTS] = {};
 uint32_t slotLastUsed[mkshft_ui::MEDIA_CACHE_SLOTS] = {};
 uint16_t transferWidth = 0;
@@ -43,7 +48,6 @@ bool beginWrite(uint8_t slot, uint8_t itemIndex, uint16_t width,
   transferItemIndex = itemIndex;
   transferKey = 0;
   transferSlot = slot;
-  slots[slot].valid = false;
   transferActive = !textOnly;
   lastTransferActivityMs = transferActive ? millis() : 0;
   return true;
@@ -88,7 +92,6 @@ bool beginKeyWrite(uint32_t key, uint16_t width, uint16_t height) {
     for (uint8_t slot = 1; slot < mkshft_ui::MEDIA_CACHE_SLOTS; ++slot) {
       if (slotLastUsed[slot] < slotLastUsed[selected]) selected = slot;
     }
-    evictedKey = slots[selected].key;
   }
 
   // Uploading a file does not bind it to a collection item.
@@ -118,7 +121,7 @@ bool writeChunk(uint32_t pixelOffset, const uint8_t *data, size_t dataLength) {
   }
 
   for (uint32_t index = 0; index < pixelCount; ++index) {
-    cachePixels[transferSlot][pixelOffset + index] =
+    stagedPixels[pixelOffset + index] =
         (static_cast<uint16_t>(data[index * 2]) << 8) | data[index * 2 + 1];
   }
   pixelsReceived += pixelCount;
@@ -142,6 +145,12 @@ bool commitWrite() {
 
   transferActive = false;
   lastTransferActivityMs = 0;
+  if (transferKey != 0 && slots[transferSlot].valid &&
+      slots[transferSlot].key != transferKey) {
+    evictedKey = slots[transferSlot].key;
+  }
+  memcpy(cachePixels[transferSlot], stagedPixels,
+         expectedPixels * sizeof(uint16_t));
   slots[transferSlot] = {transferKey, transferItemIndex, transferWidth,
                          transferHeight, true};
   slotLastUsed[transferSlot] = millis();

@@ -621,16 +621,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     const uint16_t height = (static_cast<uint16_t>(buffer[7]) << 8) | buffer[8];
     if (!mkshft_media_cache::beginKeyWrite(key, width, height))
       sendError(header, ProtocolError::REJECTED_VALUE, transactionId);
-    else {
-      const uint32_t evictedKey = mkshft_media_cache::takeEvictedKey();
-      if (evictedKey != 0) {
-        char eviction[64] = {};
-        snprintf(eviction, sizeof(eviction), "MKSHFT_CACHE_EVICT key=%lu",
-                 static_cast<unsigned long>(evictedKey));
-        sendLine(eviction);
-      }
-      sendAck(header, transactionId);
-    }
+    else sendAck(header, transactionId);
     break;
   }
   case MessageType::CACHE_FILE_CHUNK: {
@@ -653,8 +644,16 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   case MessageType::CACHE_FILE_COMMIT: {
     const uint16_t transactionId = bufSz == 3 ? (static_cast<uint16_t>(buffer[1]) << 8) | buffer[2] : 0;
     if (bufSz != 3) sendError(header, ProtocolError::MALFORMED_PACKET, transactionId);
-    else if (mkshft_media_cache::commitKeyWrite()) sendAck(header, transactionId);
-    else {
+    else if (mkshft_media_cache::commitKeyWrite()) {
+      const uint32_t evictedKey = mkshft_media_cache::takeEvictedKey();
+      if (evictedKey != 0) {
+        char eviction[64] = {};
+        snprintf(eviction, sizeof(eviction), "MKSHFT_CACHE_EVICT key=%lu",
+                 static_cast<unsigned long>(evictedKey));
+        sendLine(eviction);
+      }
+      sendAck(header, transactionId);
+    } else {
       mkshft_media_cache::cancelWrite();
       sendError(header, ProtocolError::INVALID_STATE, transactionId);
     }
@@ -686,17 +685,19 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     else sendAck(header);
     break;
   case MessageType::ASSET_BEGIN: {
-    if (bufSz != 7) {
+    if (bufSz != 7 && bufSz != 9) {
       sendError(header, ProtocolError::MALFORMED_PACKET);
       break;
     }
+    const uint16_t transactionId = bufSz == 9
+        ? (static_cast<uint16_t>(buffer[7]) << 8) | buffer[8] : 0;
     const uint16_t length =
         (static_cast<uint16_t>(buffer[5]) << 8) | buffer[6];
     if (!mkshft_assets::beginAsset(
             buffer[1], static_cast<mkshft_assets::Format>(buffer[2]),
             buffer[3], buffer[4], length))
-      sendError(header, ProtocolError::REJECTED_VALUE);
-    else sendByte(MessageType::ACK);
+      sendError(header, ProtocolError::REJECTED_VALUE, transactionId);
+    else sendAck(header, transactionId);
     break;
   }
   case MessageType::ASSET_CHUNK: {
@@ -713,13 +714,20 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     }
     break;
   }
-  case MessageType::ASSET_COMMIT:
-    if (mkshft_assets::commitAsset()) sendByte(MessageType::ACK);
+  case MessageType::ASSET_COMMIT: {
+    if (bufSz != 1 && bufSz != 3) {
+      sendError(header, ProtocolError::MALFORMED_PACKET);
+      break;
+    }
+    const uint16_t transactionId = bufSz == 3
+        ? (static_cast<uint16_t>(buffer[1]) << 8) | buffer[2] : 0;
+    if (mkshft_assets::commitAsset()) sendAck(header, transactionId);
     else {
       mkshft_assets::cancelTransfer();
-      sendError(header, ProtocolError::INVALID_STATE);
+      sendError(header, ProtocolError::INVALID_STATE, transactionId);
     }
     break;
+  }
   case MessageType::DEVICE_VISUALS:
     if (bufSz != 12 || buffer[1] != 1 ||
         !mkshft_ui::applyVisualPreferences(
