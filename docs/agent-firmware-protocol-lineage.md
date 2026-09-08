@@ -2,8 +2,8 @@
 
 ## Current paired cache release
 
-The confirmed flashed baseline is firmware `d5da8c4` on
-`stabilization/led-ui-hardening`, paired with Ctrl Core `499ed94` on
+The confirmed flashed baseline is firmware `9e10060` on
+`stabilization/led-ui-hardening`, paired with Ctrl Core `a03a7be` on
 `modernize/ctrl-2026`. It explicitly implements keyed cache protocol 4:
 
 - Packet 27-30 provide `CACHE_FILE_BEGIN`, `CACHE_FILE_CHUNK`,
@@ -11,10 +11,10 @@ The confirmed flashed baseline is firmware `d5da8c4` on
 - The device reports cache protocol 4 and 89,600 bytes of cache capacity.
 - Firmware `8932a12` resets the active collection input session on Ctrl
   disconnect, preventing a stale session from consuming physical controls.
-- Firmware `9e10060` and Ctrl `f57978b` are the next paired candidate. They
-  add packet 32, `COLLECTION_PRESENTATION`, so a cue supplies its idle and
-  activation labels. This candidate requires a firmware flash and Ctrl restart
-  together; it is not yet the flashed baseline.
+- Firmware `9e10060` and Ctrl `f57978b` added packet 32,
+  `COLLECTION_PRESENTATION`, so a cue supplies its idle and activation labels.
+- Firmware `4a4fd3f` is the next unflashed candidate. It stages collection
+  lists and runtime manifests until commit, with bounded cancellation paths.
 
 ## Historical direct-art baseline on 2026-09-06
 
