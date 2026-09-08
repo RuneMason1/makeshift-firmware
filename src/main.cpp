@@ -560,7 +560,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
         mkshft_runtime::PROTOCOL_VERSION, mkshft_runtime::MAX_COMPONENTS,
         0xFE, 0x1F, mkshft_assets::MAX_ASSETS,
         mkshft_ui::MEDIA_CACHE_SLOTS, 0x00, 0xF0,
-        3, 0x01, 0x00, 0xF0,
+        4, 0x01, 0x00, 0xF0,
         static_cast<uint8_t>(cacheBytes >> 24),
         static_cast<uint8_t>(cacheBytes >> 16),
         static_cast<uint8_t>(cacheBytes >> 8),
@@ -578,17 +578,19 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
   case MessageType::CACHE_FILE_BEGIN: {
     // key:u32, width:u16, height:u16. Logical names stay on Ctrl; firmware
     // only provides bounded storage keyed by the opaque value.
-    if (bufSz != 9) {
-      sendError(header, ProtocolError::MALFORMED_PACKET);
+    if (bufSz != 11) {
+      sendError(header, ProtocolError::MALFORMED_PACKET,
+                bufSz >= 3 ? (static_cast<uint16_t>(buffer[bufSz - 2]) << 8) | buffer[bufSz - 1] : 0);
       break;
     }
+    const uint16_t transactionId = (static_cast<uint16_t>(buffer[9]) << 8) | buffer[10];
     const uint32_t key = (static_cast<uint32_t>(buffer[1]) << 24) |
                          (static_cast<uint32_t>(buffer[2]) << 16) |
                          (static_cast<uint32_t>(buffer[3]) << 8) | buffer[4];
     const uint16_t width = (static_cast<uint16_t>(buffer[5]) << 8) | buffer[6];
     const uint16_t height = (static_cast<uint16_t>(buffer[7]) << 8) | buffer[8];
     if (!mkshft_media_cache::beginKeyWrite(key, width, height))
-      sendError(header, ProtocolError::REJECTED_VALUE);
+      sendError(header, ProtocolError::REJECTED_VALUE, transactionId);
     else {
       const uint32_t evictedKey = mkshft_media_cache::takeEvictedKey();
       if (evictedKey != 0) {
@@ -597,7 +599,7 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
                  static_cast<unsigned long>(evictedKey));
         sendLine(eviction);
       }
-      sendAck(header);
+      sendAck(header, transactionId);
     }
     break;
   }
@@ -616,24 +618,29 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
       sendError(header, ProtocolError::INVALID_STATE);
     break;
   }
-  case MessageType::CACHE_FILE_COMMIT:
-    if (mkshft_media_cache::commitKeyWrite()) sendAck(header);
-    else sendError(header, ProtocolError::INVALID_STATE);
+  case MessageType::CACHE_FILE_COMMIT: {
+    const uint16_t transactionId = bufSz == 3 ? (static_cast<uint16_t>(buffer[1]) << 8) | buffer[2] : 0;
+    if (bufSz != 3) sendError(header, ProtocolError::MALFORMED_PACKET, transactionId);
+    else if (mkshft_media_cache::commitKeyWrite()) sendAck(header, transactionId);
+    else sendError(header, ProtocolError::INVALID_STATE, transactionId);
     break;
+  }
   case MessageType::CACHE_FILE_BIND: {
     // key:u32, collectionItemIndex:u8. The host may bind an already uploaded
     // asset to any active collection without copying its pixel buffer again.
-    if (bufSz != 6) {
-      sendError(header, ProtocolError::MALFORMED_PACKET);
+    if (bufSz != 8) {
+      sendError(header, ProtocolError::MALFORMED_PACKET,
+                bufSz >= 3 ? (static_cast<uint16_t>(buffer[bufSz - 2]) << 8) | buffer[bufSz - 1] : 0);
       break;
     }
+    const uint16_t transactionId = (static_cast<uint16_t>(buffer[6]) << 8) | buffer[7];
     const uint32_t key = (static_cast<uint32_t>(buffer[1]) << 24) |
                          (static_cast<uint32_t>(buffer[2]) << 16) |
                          (static_cast<uint32_t>(buffer[3]) << 8) | buffer[4];
     if (!mkshft_ui::bindCollectionAsset(key, buffer[5]))
-      sendError(header, ProtocolError::INVALID_STATE);
+      sendError(header, ProtocolError::INVALID_STATE, transactionId);
     else
-      sendAck(header);
+      sendAck(header, transactionId);
     break;
   }
   case MessageType::LED_INDICATOR:

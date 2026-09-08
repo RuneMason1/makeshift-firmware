@@ -92,8 +92,8 @@ void sendReady();
 void sendString(std::string);
 void sendLine(std::string);
 void sendByte(MessageType t);
-void sendAck(MessageType request);
-void sendError(MessageType request, ProtocolError error);
+void sendAck(MessageType request, uint16_t transactionId = 0);
+void sendError(MessageType request, ProtocolError error, uint16_t transactionId = 0);
 
 // wraps PacketSerial.send with a connection check
 void send(MessageType, const uint8_t *, size_t);

@@ -79,14 +79,18 @@ void sendByte(MessageType t) {
   sendRaw(buf, 1);
 }
 
-void sendAck(MessageType request) {
-  const uint8_t body[] = {static_cast<uint8_t>(request)};
+void sendAck(MessageType request, uint16_t transactionId) {
+  const uint8_t body[] = {static_cast<uint8_t>(request),
+                          static_cast<uint8_t>(transactionId >> 8),
+                          static_cast<uint8_t>(transactionId)};
   send(MessageType::ACK, body, sizeof(body));
 }
 
-void sendError(MessageType request, ProtocolError error) {
+void sendError(MessageType request, ProtocolError error, uint16_t transactionId) {
   const uint8_t body[] = {static_cast<uint8_t>(request),
-                          static_cast<uint8_t>(error)};
+                          static_cast<uint8_t>(error),
+                          static_cast<uint8_t>(transactionId >> 8),
+                          static_cast<uint8_t>(transactionId)};
   send(MessageType::ERROR, body, sizeof(body));
 }
 
