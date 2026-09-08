@@ -16,7 +16,11 @@
 
 inline namespace mkshft_ctrl {
 
-extern SLIPPacketSerial packetSerial;
+// Cache transfers use the established sub-240-byte host frame limit. Retain
+// the LED-good SLIP framing and 256-byte decoder until a larger-frame path
+// has separately passed physical cold-boot validation.
+using MakeShiftPacketSerial = SLIPPacketSerial;
+extern MakeShiftPacketSerial packetSerial;
 
 enum MessageType {
   PING,
@@ -46,6 +50,13 @@ enum MessageType {
   DEVICE_VISUALS,
   COLLECTION_INPUT_BINDING,
   STATUS_BADGE,
+  // Generic host-managed RGB565 cache. Ctrl Core already reserves these
+  // values, so keep them stable across firmware revisions.
+  CACHE_FILE_BEGIN,
+  CACHE_FILE_CHUNK,
+  CACHE_FILE_COMMIT,
+  CACHE_FILE_BIND,
+  LED_INDICATOR,
 
   // Generic names for the stable legacy collection packet values.
   COLLECTION_CARD_BEGIN = GAME_CARD_BEGIN,
@@ -81,6 +92,7 @@ void sendReady();
 void sendString(std::string);
 void sendLine(std::string);
 void sendByte(MessageType t);
+void sendAck(MessageType request);
 void sendError(MessageType request, ProtocolError error);
 
 // wraps PacketSerial.send with a connection check

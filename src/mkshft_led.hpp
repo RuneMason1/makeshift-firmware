@@ -37,6 +37,7 @@ int8_t setButtonState(uint8_t buttonIndex, bool pressed);
 uint16_t activePhysicalMask();
 uint32_t outputPadConfig();
 void setBaseColor(uint8_t r, uint8_t g, uint8_t b);
+bool setIndicator(uint8_t button, bool enabled, uint8_t r, uint8_t g, uint8_t b);
 
 void colorStripPixel(uint8_t row, uint8_t col, uint8_t r, uint8_t g, uint8_t b);
 void colorStripPixel(uint8_t row, uint8_t col, Color color);

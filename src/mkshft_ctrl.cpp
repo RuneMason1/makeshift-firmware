@@ -2,7 +2,7 @@
 
 inline namespace mkshft_ctrl {
 uint8_t UID[8];
-SLIPPacketSerial packetSerial;
+MakeShiftPacketSerial packetSerial;
 bool connected = false;
 
 void sendState(core::state_t st) {
@@ -77,6 +77,11 @@ void sendByte(MessageType t) {
   buf[0] = (uint8_t)t;
 
   sendRaw(buf, 1);
+}
+
+void sendAck(MessageType request) {
+  const uint8_t body[] = {static_cast<uint8_t>(request)};
+  send(MessageType::ACK, body, sizeof(body));
 }
 
 void sendError(MessageType request, ProtocolError error) {

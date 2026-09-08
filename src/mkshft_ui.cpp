@@ -682,6 +682,16 @@ bool commitCollectionCard() {
   return committed;
 }
 
+bool bindCollectionAsset(uint32_t key, uint8_t itemIndex) {
+  if (itemIndex >= cachedGameCount ||
+      !mkshft_media_cache::bindKeyToItem(key, itemIndex)) return false;
+  if (localGameCarouselActive && gameCardVisible && selectedGameIndex == itemIndex) {
+    gameCardLastInteractionMs = millis();
+    renderGameCard(findArtworkSlot(selectedGameIndex));
+  }
+  return true;
+}
+
 void showHomeScreen() {
   gameCardVisible = false;
   collectionLaunching = false;
@@ -700,7 +710,9 @@ bool beginCollectionList(uint8_t expectedCount) {
   expectedGameCount = expectedCount;
   cachedGameCount = 0;
   localGameCarouselActive = false;
-  mkshft_media_cache::invalidateAll();
+  // A new collection must not inherit item-index artwork from the previous
+  // one, but keyed assets remain reusable through CACHE_FILE_BIND.
+  mkshft_media_cache::invalidateBindings();
   return true;
 }
 
@@ -730,6 +742,15 @@ bool commitCollectionList() {
   if (cachedGameCount == 0 || cachedGameCount != expectedGameCount) return false;
   selectedGameIndex = 0;
   localGameCarouselActive = true;
+  // Opening a collection is itself a visible state transition. Previously
+  // the first encoder detent only committed the list; a second detent was
+  // required before the selected item was drawn.
+  strncpy(gameTitle, cachedGames[selectedGameIndex].title, GAME_TITLE_MAX_LENGTH);
+  gameTitle[GAME_TITLE_MAX_LENGTH] = '\0';
+  gameCardVisible = true;
+  collectionLaunching = false;
+  gameCardLastInteractionMs = millis();
+  renderGameCard(findArtworkSlot(selectedGameIndex));
   return true;
 }
 

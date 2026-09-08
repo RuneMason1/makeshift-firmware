@@ -14,6 +14,8 @@ DMAMEM byte displayMemory[PhysicalStripSz * 12] = {};
 WS2812Serial strip(PhysicalStripSz, displayMemory, drawingMemory, LED_PIN,
                    WS2812_GRB);
 bool states[StripSz] = {};
+bool indicators[StripSz] = {};
+uint8_t indicatorRgb[StripSz][3] = {};
 LedChannel red[StripSz] = {};
 LedChannel green[StripSz] = {};
 LedChannel blue[StripSz] = {};
@@ -77,6 +79,11 @@ void applyTargets() {
     red[logicalIndex].target = active ? linearLevelForOutput(peakR) : 0;
     green[logicalIndex].target = active ? linearLevelForOutput(peakG) : 0;
     blue[logicalIndex].target = active ? linearLevelForOutput(peakB) : 0;
+    if (indicators[logicalIndex] && outputEnabled) {
+      red[logicalIndex].target = linearLevelForOutput(indicatorRgb[logicalIndex][0]);
+      green[logicalIndex].target = linearLevelForOutput(indicatorRgb[logicalIndex][1]);
+      blue[logicalIndex].target = linearLevelForOutput(indicatorRgb[logicalIndex][2]);
+    }
   }
 }
 
@@ -162,6 +169,15 @@ int8_t setButtonState(uint8_t buttonIndex, bool pressed) {
 }
 
 bool isReady() { return driverReady; }
+bool setIndicator(uint8_t button, bool enabled, uint8_t r, uint8_t g, uint8_t b) {
+  if (button >= StripSz) return false;
+  indicators[button] = enabled;
+  indicatorRgb[button][0] = r;
+  indicatorRgb[button][1] = g;
+  indicatorRgb[button][2] = b;
+  applyTargets();
+  return true;
+}
 
 uint16_t activePhysicalMask() { return physicalMask; }
 

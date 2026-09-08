@@ -74,6 +74,9 @@ bool applyVisualPreferences(uint8_t splashImageId, uint8_t ledR, uint8_t ledG,
 // names for compatibility with existing ctrl/agent code.
 constexpr uint16_t COLLECTION_ART_MAX_WIDTH = 80;
 constexpr uint16_t COLLECTION_ART_MAX_HEIGHT = 80;
+// This is storage implementation detail, not a host-visible carousel limit.
+// Keep the LED-approved seven-buffer footprint until an expanded-cache build
+// has separately passed physical cold-boot validation.
 constexpr uint8_t MEDIA_CACHE_SLOTS = 7;
 constexpr size_t COLLECTION_TITLE_MAX_LENGTH = 48;
 constexpr size_t COLLECTION_ITEM_ID_MAX_LENGTH = 12;
@@ -93,6 +96,7 @@ bool beginCollectionCard(uint8_t slot, uint8_t itemIndex, const char *title,
 bool writeCollectionArtChunk(uint32_t pixelOffset, const uint8_t *data,
                              size_t dataLength);
 bool commitCollectionCard();
+bool bindCollectionAsset(uint32_t key, uint8_t itemIndex);
 bool beginCollectionList(uint8_t expectedCount);
 bool addCollectionListItem(const char *itemId, size_t itemIdLength,
                            const char *title, size_t titleLength);

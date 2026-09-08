@@ -560,8 +560,82 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
         mkshft_ui::MEDIA_CACHE_SLOTS, 0x00, 0xF0};
     send(MessageType::RUNTIME_CAPABILITIES, capabilities,
          sizeof(capabilities));
+    char cacheStatus[64] = {};
+    snprintf(cacheStatus, sizeof(cacheStatus),
+             "MKSHFT_CACHE protocol=3 bytes=%lu packet=240",
+             static_cast<unsigned long>(mkshft_media_cache::CACHE_CAPACITY_BYTES));
+    sendLine(cacheStatus);
+    sendLine("MKSHFT_LED indicator=1");
     break;
   }
+  case MessageType::CACHE_FILE_BEGIN: {
+    // key:u32, width:u16, height:u16. Logical names stay on Ctrl; firmware
+    // only provides bounded storage keyed by the opaque value.
+    if (bufSz != 9) {
+      sendError(header, ProtocolError::MALFORMED_PACKET);
+      break;
+    }
+    const uint32_t key = (static_cast<uint32_t>(buffer[1]) << 24) |
+                         (static_cast<uint32_t>(buffer[2]) << 16) |
+                         (static_cast<uint32_t>(buffer[3]) << 8) | buffer[4];
+    const uint16_t width = (static_cast<uint16_t>(buffer[5]) << 8) | buffer[6];
+    const uint16_t height = (static_cast<uint16_t>(buffer[7]) << 8) | buffer[8];
+    if (!mkshft_media_cache::beginKeyWrite(key, width, height))
+      sendError(header, ProtocolError::REJECTED_VALUE);
+    else {
+      const uint32_t evictedKey = mkshft_media_cache::takeEvictedKey();
+      if (evictedKey != 0) {
+        char eviction[64] = {};
+        snprintf(eviction, sizeof(eviction), "MKSHFT_CACHE_EVICT key=%lu",
+                 static_cast<unsigned long>(evictedKey));
+        sendLine(eviction);
+      }
+      sendAck(header);
+    }
+    break;
+  }
+  case MessageType::CACHE_FILE_CHUNK: {
+    // byteOffset:u32, RGB565 bytes. Byte offsets make the wire format
+    // independent of image-specific pixel terminology.
+    constexpr size_t CACHE_CHUNK_MAX_BYTES = 1024;
+    if (bufSz < 7 || bufSz - 5 > CACHE_CHUNK_MAX_BYTES) {
+      sendError(header, ProtocolError::MALFORMED_PACKET);
+      break;
+    }
+    const uint32_t byteOffset = (static_cast<uint32_t>(buffer[1]) << 24) |
+                                (static_cast<uint32_t>(buffer[2]) << 16) |
+                                (static_cast<uint32_t>(buffer[3]) << 8) | buffer[4];
+    if (!mkshft_media_cache::writeByteChunk(byteOffset, buffer + 5, bufSz - 5))
+      sendError(header, ProtocolError::INVALID_STATE);
+    break;
+  }
+  case MessageType::CACHE_FILE_COMMIT:
+    if (mkshft_media_cache::commitKeyWrite()) sendAck(header);
+    else sendError(header, ProtocolError::INVALID_STATE);
+    break;
+  case MessageType::CACHE_FILE_BIND: {
+    // key:u32, collectionItemIndex:u8. The host may bind an already uploaded
+    // asset to any active collection without copying its pixel buffer again.
+    if (bufSz != 6) {
+      sendError(header, ProtocolError::MALFORMED_PACKET);
+      break;
+    }
+    const uint32_t key = (static_cast<uint32_t>(buffer[1]) << 24) |
+                         (static_cast<uint32_t>(buffer[2]) << 16) |
+                         (static_cast<uint32_t>(buffer[3]) << 8) | buffer[4];
+    if (!mkshft_ui::bindCollectionAsset(key, buffer[5]))
+      sendError(header, ProtocolError::INVALID_STATE);
+    else
+      sendAck(header);
+    break;
+  }
+  case MessageType::LED_INDICATOR:
+    if (bufSz != 6 || buffer[2] > 1 ||
+        !mkshft_ledMatrix::setIndicator(buffer[1], buffer[2] != 0,
+                                       buffer[3], buffer[4], buffer[5]))
+      sendError(header, ProtocolError::MALFORMED_PACKET);
+    else sendAck(header);
+    break;
   case MessageType::ASSET_BEGIN: {
     if (bufSz != 7) {
       sendError(header, ProtocolError::MALFORMED_PACKET);
