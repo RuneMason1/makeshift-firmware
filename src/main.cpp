@@ -417,7 +417,9 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
     connected = false;
     mkshft_assets::cancelTransfer();
     mkshft_media_cache::cancelWrite();
+    mkshft_media_cache::invalidateBindings();
     mkshft_runtime::cancelManifest();
+    mkshft_ui::cancelCollectionList();
     mkshft_ui::setUsbConnected(false);
     break;
   case MessageType::COLLECTION_CARD_BEGIN: {
