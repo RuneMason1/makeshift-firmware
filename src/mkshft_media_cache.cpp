@@ -38,7 +38,7 @@ bool beginWrite(uint8_t slot, uint8_t itemIndex, uint16_t width,
       height <= mkshft_ui::COLLECTION_ART_MAX_HEIGHT;
   if (slot >= mkshft_ui::MEDIA_CACHE_SLOTS ||
       (!textOnly && !validArtworkSize)) {
-    transferActive = false;
+    cancelWrite();
     return false;
   }
 
@@ -116,7 +116,7 @@ bool writeChunk(uint32_t pixelOffset, const uint8_t *data, size_t dataLength) {
   const uint32_t pixelCount = dataLength / 2;
   const uint32_t expectedPixels = transferWidth * transferHeight;
   if (pixelOffset + pixelCount > expectedPixels) {
-    transferActive = false;
+    cancelWrite();
     return false;
   }
 

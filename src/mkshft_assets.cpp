@@ -125,10 +125,15 @@ bool writeChunk(uint16_t offset, const uint8_t *data, size_t length) {
 bool commitAsset() {
   if (transferExpired()) cancelTransfer();
   if (!transferActive || received != pending.length) return false;
-  if (pending.format == Format::VECTOR_COMMANDS && !validVector(pending))
+  if (pending.format == Format::VECTOR_COMMANDS && !validVector(pending)) {
+    cancelTransfer();
     return false;
+  }
   const int8_t slot = findSlot(pending.id);
-  if (slot < 0) return false;
+  if (slot < 0) {
+    cancelTransfer();
+    return false;
+  }
   pending.valid = true;
   assets[slot] = pending;
   cancelTransfer();
