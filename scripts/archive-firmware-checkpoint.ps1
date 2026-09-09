@@ -8,11 +8,28 @@ $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $checkpoint = [IO.Path]::GetFullPath($CheckpointPath)
 $hex = (Resolve-Path $FirmwareHex).Path
-$allowedRoot = [IO.Path]::GetFullPath(
-  (Join-Path (Split-Path $repo -Parent) '.codex\checkpoints'))
+$allowedRoot = [IO.Path]::GetFullPath((Join-Path (Split-Path $repo -Parent) '.codex\checkpoints'))
+$allowedPrefix = $allowedRoot.TrimEnd('\') + '\'
 
-if (!$checkpoint.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+if (!$checkpoint.StartsWith($allowedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
   throw "Checkpoint must be inside $allowedRoot"
+}
+
+function Get-PlatformIOVersion {
+  $candidates = @(
+    (Join-Path $env:APPDATA 'Python\Python313\Scripts\platformio.exe'),
+    (Join-Path $env:APPDATA 'Python\Python312\Scripts\platformio.exe'),
+    'platformio.exe',
+    'pio.exe'
+  )
+  foreach ($candidate in $candidates) {
+    try {
+      if ($candidate -notin @('platformio.exe', 'pio.exe') -and !(Test-Path -LiteralPath $candidate)) { continue }
+      $result = & $candidate --version 2>$null
+      if ($LASTEXITCODE -eq 0 -and $result) { return $result.Trim() }
+    } catch { }
+  }
+  throw 'PlatformIO was not found. Install it or add its Scripts directory to PATH.'
 }
 
 New-Item -ItemType Directory -Path $checkpoint -Force | Out-Null
@@ -46,7 +63,7 @@ if (![IO.Path]::GetFullPath($hex).Equals(
 $metadata = [ordered]@{
   commit = (& git -C $repo rev-parse $Commit).Trim()
   firmwareSha256 = (Get-FileHash -Algorithm SHA256 $hex).Hash
-  platformio = (& "$env:APPDATA\Python\Python312\Scripts\platformio.exe" --version).Trim()
+  platformio = Get-PlatformIOVersion
   archivedAt = (Get-Date).ToString('o')
 }
 [IO.File]::WriteAllText(
