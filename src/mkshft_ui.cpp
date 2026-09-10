@@ -710,6 +710,8 @@ bool bindCollectionAsset(uint32_t key, uint8_t itemIndex) {
 }
 
 void showHomeScreen() {
+  // Once the card is gone, return the button and dial to ordinary Ctrl input.
+  localGameCarouselActive = false;
   gameCardVisible = false;
   collectionLaunching = false;
   gameCardLastInteractionMs = 0;

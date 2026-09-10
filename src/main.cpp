@@ -257,7 +257,8 @@ void loop()
   const bool collectionInputActive =
       mkshft_ctrl::connected &&
       mkshft_runtime::isEnabled(mkshft_runtime::ComponentType::CAROUSEL) &&
-      mkshft_ui::isLocalCollectionActive();
+      mkshft_ui::isLocalCollectionActive() &&
+      mkshft_ui::isGameCardVisible();
   if (collectionInputActive) {
     if (stateCurr.dialRelative[collectionDialIndex] != 0) {
       mkshft_ui::moveLocalCollectionSelection(
