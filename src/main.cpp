@@ -597,12 +597,14 @@ void onPacketReceived(const uint8_t *buffer, size_t bufSz) {
         static_cast<uint8_t>(cacheBytes >> 24),
         static_cast<uint8_t>(cacheBytes >> 16),
         static_cast<uint8_t>(cacheBytes >> 8),
-        static_cast<uint8_t>(cacheBytes)};
+        static_cast<uint8_t>(cacheBytes),
+        // Firmware identity: 0.0.3, cache/UI stabilization build 1.
+        0, 0, 3, 1};
     send(MessageType::RUNTIME_CAPABILITIES, capabilities,
          sizeof(capabilities));
     char cacheStatus[64] = {};
     snprintf(cacheStatus, sizeof(cacheStatus),
-             "MKSHFT_CACHE protocol=3 bytes=%lu packet=240",
+             "MKSHFT_CACHE protocol=4 bytes=%lu packet=240",
              static_cast<unsigned long>(mkshft_media_cache::CACHE_CAPACITY_BYTES));
     sendLine(cacheStatus);
     sendLine("MKSHFT_LED indicator=1");
